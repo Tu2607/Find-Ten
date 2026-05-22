@@ -50,6 +50,20 @@ The cache is rebuilt:
 
 The cache is not rebuilt after rejected moves because the board did not change.
 
+## Validation And Cache Trade-Offs
+
+The board size is fixed and small. At the maximum `11x11` size, there are only `4,356` possible rectangles. That means validation could be implemented without a cache and still run fast enough.
+
+The cache is used because it simplifies the rest of the game:
+- move validation becomes a direct lookup
+- game-over detection becomes `len(ValidMoves) == 0`
+- hints and debug output can read from the same source
+- future bots, replay verification, and difficulty analysis can reuse the cached move list
+
+The trade-off is keeping derived state in sync with the board. The project accepts that cost because the sync rule is simple: rebuild the full cache whenever the board changes.
+
+Incremental cache updates are intentionally avoided. They would add more bookkeeping and edge cases, while full rebuilds are deterministic, easy to test, and fast enough for the fixed board sizes.
+
 ## Prefix Sums
 
 The backend uses a 2D prefix sum table to compute rectangle sums in O(1).

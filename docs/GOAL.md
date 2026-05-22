@@ -25,10 +25,12 @@ Included:
 - CLI demo as the first manual testing surface
 
 Excluded for MVP:
-- arbitrary quadrilateral selection
 - WebUI
 - multiplayer
 - collapse/refill behavior
+
+Permanently excluded:
+- arbitrary quadrilateral selection
 
 ## Gameplay Rules
 
@@ -39,6 +41,8 @@ After a valid move:
 - cells do not collapse
 - cells are not refilled
 - existing `0` cells may be included in future selections
+
+Selections are rectangle-only. Arbitrary quadrilateral shapes are intentionally excluded because they would make finding valid sums too easy.
 
 A move is valid only when the selected rectangle sums to exactly `10`.
 
@@ -59,7 +63,6 @@ The game ends when:
 Future work may add:
 - WebUI rendering and input
 - WebSocket transport
-- arbitrary quadrilateral selection
 - same-board multiplayer race mode
 - hints
 - replay validation
