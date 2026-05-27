@@ -86,15 +86,50 @@ One goroutine owns game state and processes events serially:
 
 This avoids race-prone shared mutation and creates a direct path to future WebSocket and multiplayer support.
 
+## State Sharing And Snapshots
+
+External callers should not read `GameState` directly while the game loop is running. The loop owns game-state mutation and should also own game-state reads that are shared outside the loop.
+
+The project will expose hard-copy `GameSnapshot` values for display and future network responses. A snapshot is a point-in-time view of the authoritative state and must not share mutable backing data with `GameState`. In particular, `Board` must be deep-copied.
+
+Snapshots are emitted by `RunGame` after it processes authoritative events:
+- initial game start
+- move events
+- timer tick events
+
+The timer remains a producer only. It sends `EventTick` to the input event channel and does not read or mutate game state. `RunGame` handles the tick, updates time, creates the snapshot, and publishes it.
+
+Snapshot ordering uses a local sequence counter owned by `RunGame`. The sequence starts at `1` for the initial snapshot and increments with each emitted snapshot. The sequence does not belong on `GameState`; it is runtime stream metadata. A future game manager or match session can own this counter when the runtime grows beyond a single loop function.
+
+Snapshots may also include a timestamp. The timestamp helps clients estimate display freshness or smooth a countdown, while the sequence is the authoritative ordering signal.
+
+## Concurrency Trade-Offs
+
+A mutex-based design could protect shared `GameState` reads and writes. That would work for a small CLI, but it spreads lock discipline across every caller. Future HTTP handlers, WebSocket clients, timers, tests, and multiplayer code would all need to remember to lock before touching state.
+
+The chosen design is actor-style ownership:
+- producers send events
+- `RunGame` serially processes events
+- `RunGame` owns all state reads and writes
+- callers receive snapshots instead of shared mutable state
+
+This design is slightly more structured than direct state reads with a mutex, but it better matches the planned web backend. It gives future move submission, spectator views, replay verification, and multiplayer match loops a single authoritative path for state changes and state views.
+
+The project keeps one input channel for state-changing events. Snapshot delivery uses an output channel, but that channel does not manage state; it only carries immutable views produced by the state owner.
+
 ## CLI First
 
 The CLI demo is the first manual testing surface.
 
-It should:
-- generate a supported board size
-- print the board
-- accept zero-based rectangle coordinates
-- apply moves through the same backend validation path
-- print score, valid move count, and game-over state
+The CLI is not a separate rules implementation. It is a thin client over `internal/game` and follows the same actor-style ownership model planned for a future web backend.
 
-The CLI is not a separate rules implementation. It is only a thin client over `internal/game`.
+The CLI wiring has three channels:
+- an input line channel fed by a scanner goroutine
+- the game event channel consumed by `RunGame`
+- the snapshot channel produced by `RunGame`
+
+The CLI does not call `ApplyMove` directly after the game loop starts. It parses input into a `Selection`, sends an `EventMove`, waits for the per-move result channel, and renders state from snapshots.
+
+Move result waits are context-aware. If the game context is canceled before a result is sent, the CLI stops waiting instead of blocking forever. Per-move result channels are one-shot response channels: they may receive at most one result and are not closed.
+
+Snapshot rendering is also event-driven. The CLI prints the initial snapshot, then prints later snapshots emitted after moves and timer ticks. This keeps display reads out of shared mutable `GameState` and makes the CLI a useful concurrency demo rather than a shortcut around the backend architecture.

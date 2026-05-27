@@ -67,3 +67,12 @@ func countNonZeroCells(selection Selection, board Board) int {
 
 	return count
 }
+
+func cloneBoard(board Board) Board {
+	clone := make(Board, len(board))
+	for row := range board {
+		clone[row] = append([]int(nil), board[row]...)
+	}
+
+	return clone
+}

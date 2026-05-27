@@ -2,6 +2,8 @@ package game
 
 const targetMoveSum = 10
 
+// HasValidMove is a legacy convenience method for quick checks when callers
+// only have a board and do not want to mutate GameState.
 func HasValidMove(board Board) bool {
 	validMoves, _ := buildValidMoveCache(board)
 	return len(validMoves) > 0

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -46,8 +47,21 @@ func TestRunAppliesMove(t *testing.T) {
 	}
 	move := state.ValidMoves[0]
 
-	input := stringsForTest(move) + "\n"
-	run(stringsReader(input), discardWriter{}, state)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	events := make(chan game.Event, 4)
+	snapshots := make(chan game.GameSnapshot, 4)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		game.RunGame(ctx, events, snapshots, state)
+	}()
+
+	input := stringsForTest(move) + "\nq\n"
+	run(ctx, stringsReader(input), discardWriter{}, events, snapshots)
+	close(events)
+	<-done
 
 	if state.Score == 0 {
 		t.Fatal("state.Score = 0, want score after valid move")

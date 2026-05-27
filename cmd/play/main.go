@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -22,44 +23,111 @@ func main() {
 		os.Exit(1)
 	}
 
-	run(os.Stdin, os.Stdout, state)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	events := make(chan game.Event, 16)
+	snapshots := make(chan game.GameSnapshot, 16)
+
+	go game.RunGame(ctx, events, snapshots, state)
+	go game.StartTimer(ctx, events)
+
+	run(ctx, os.Stdin, os.Stdout, events, snapshots)
+	cancel()
 }
 
-func run(input io.Reader, output io.Writer, state *game.GameState) {
-	scanner := bufio.NewScanner(input)
-	printState(output, state)
+func run(ctx context.Context, input io.Reader, output io.Writer, events chan<- game.Event, snapshots <-chan game.GameSnapshot) {
+	lines := scanLines(ctx, input)
 
-	for !state.GameOver {
-		fmt.Fprint(output, "move row1 col1 row2 col2, or q to quit: ")
-		if !scanner.Scan() {
-			fmt.Fprintln(output)
+	for {
+		select {
+		case <-ctx.Done():
 			return
-		}
 
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		if line == "q" || line == "quit" {
-			fmt.Fprintln(output, "quit")
-			return
-		}
+		case snapshot, ok := <-snapshots:
+			if !ok {
+				return
+			}
+			printSnapshot(output, snapshot)
+			if snapshot.GameOver {
+				fmt.Fprintln(output, "game over")
+				return
+			}
+			fmt.Fprint(output, "move row1 col1 row2 col2, or q to quit: ")
 
-		selection, err := parseSelection(line)
-		if err != nil {
-			fmt.Fprintf(output, "invalid input: %v\n", err)
-			continue
+		case line, ok := <-lines:
+			if !ok {
+				fmt.Fprintln(output)
+				return
+			}
+			if !handleInputLine(ctx, output, line, events) {
+				return
+			}
 		}
+	}
+}
 
-		if err := game.ApplyMove(state, selection); err != nil {
-			fmt.Fprintf(output, "move rejected: %v\n", err)
-			continue
+func scanLines(ctx context.Context, input io.Reader) <-chan string {
+	lines := make(chan string)
+
+	go func() {
+		defer close(lines)
+		scanner := bufio.NewScanner(input)
+		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return
+			case lines <- scanner.Text():
+			}
 		}
+	}()
 
-		printState(output, state)
+	return lines
+}
+
+func handleInputLine(ctx context.Context, output io.Writer, line string, events chan<- game.Event) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return true
+	}
+	if line == "q" || line == "quit" {
+		fmt.Fprintln(output, "quit")
+		return false
 	}
 
-	fmt.Fprintln(output, "game over")
+	selection, err := parseSelection(line)
+	if err != nil {
+		fmt.Fprintf(output, "invalid input: %v\n", err)
+		fmt.Fprint(output, "move row1 col1 row2 col2, or q to quit: ")
+		return true
+	}
+
+	results := make(chan game.MoveResult, 1)
+	event := game.Event{
+		Type:   game.EventMove,
+		Move:   selection,
+		Result: results,
+	}
+
+	select {
+	case events <- event:
+	case <-ctx.Done():
+		return false
+	}
+
+	var result game.MoveResult
+	select {
+	case result = <-results:
+	case <-ctx.Done():
+		return false
+	}
+
+	if result.Err != nil {
+		fmt.Fprintf(output, "move rejected: %v\n", result.Err)
+		fmt.Fprint(output, "move row1 col1 row2 col2, or q to quit: ")
+	}
+
+	return true
 }
 
 func parseSelection(line string) (game.Selection, error) {
@@ -83,17 +151,23 @@ func parseSelection(line string) (game.Selection, error) {
 	}, nil
 }
 
-func printState(output io.Writer, state *game.GameState) {
-	printBoard(output, state.Board)
-	fmt.Fprintf(output, "score: %d | valid moves: %d | remaining time: %d | game over: %t\n",
-		state.Score,
-		len(state.ValidMoves),
-		state.RemainingTime,
-		state.GameOver,
+func printSnapshot(output io.Writer, snapshot game.GameSnapshot) {
+	printBoard(output, snapshot.Board)
+	fmt.Fprintf(output, "seq: %d | score: %d | valid moves: %d | remaining time: %d | game over: %t\n",
+		snapshot.Sequence,
+		snapshot.Score,
+		snapshot.ValidMoveCount,
+		snapshot.RemainingTime,
+		snapshot.GameOver,
 	)
 }
 
 func printBoard(output io.Writer, board game.Board) {
+	if len(board) == 0 {
+		fmt.Fprintln(output, "(empty board)")
+		return
+	}
+
 	fmt.Fprint(output, "    ")
 	for col := range board[0] {
 		fmt.Fprintf(output, "%2d ", col)

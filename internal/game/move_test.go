@@ -65,7 +65,7 @@ func TestApplyMoveRejectsInvalidMoveWithoutMutation(t *testing.T) {
 		},
 	}
 	rebuildValidMoveCache(state)
-	beforeBoard := cloneBoard(state.Board)
+	beforeBoard := cloneBoardForTest(state.Board)
 	beforeScore := state.Score
 	beforeMoves := append([]Selection(nil), state.ValidMoves...)
 
@@ -153,7 +153,7 @@ func TestApplyMoveRebuildsCacheAndSetsGameOver(t *testing.T) {
 	}
 }
 
-func cloneBoard(board Board) Board {
+func cloneBoardForTest(board Board) Board {
 	clone := make(Board, len(board))
 	for row := range board {
 		clone[row] = append([]int(nil), board[row]...)

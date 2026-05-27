@@ -1,6 +1,9 @@
 package game
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 const (
 	MinSupportedBoardSize = 9
@@ -27,6 +30,21 @@ type GameState struct {
 	RemainingTime int
 
 	validMoveSet map[Selection]struct{}
+}
+
+type GameSnapshot struct {
+	Sequence       int64
+	Board          Board
+	Score          int
+	GameOver       bool
+	RemainingTime  int
+	ValidMoveCount int
+	SnapshotTime   time.Time
+}
+
+type MoveResult struct {
+	Err      error
+	Snapshot GameSnapshot
 }
 
 func IsSupportedBoardSize(size int) bool {
