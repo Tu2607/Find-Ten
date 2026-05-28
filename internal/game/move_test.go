@@ -151,6 +151,9 @@ func TestApplyMoveRebuildsCacheAndSetsGameOver(t *testing.T) {
 	if !state.GameOver {
 		t.Fatal("state.GameOver = false, want true")
 	}
+	if state.GameOverReason != GameOverNoValidMoves {
+		t.Fatalf("state.GameOverReason = %v, want %v", state.GameOverReason, GameOverNoValidMoves)
+	}
 }
 
 func cloneBoardForTest(board Board) Board {

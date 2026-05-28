@@ -95,6 +95,7 @@ func newGameSnapshot(state *GameState, sequence int64) GameSnapshot {
 	snapshot.Board = cloneBoard(state.Board)
 	snapshot.Score = state.Score
 	snapshot.GameOver = state.GameOver
+	snapshot.GameOverReason = state.GameOverReason
 	snapshot.RemainingTime = state.RemainingTime
 	snapshot.ValidMoveCount = len(state.ValidMoves)
 

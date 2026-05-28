@@ -18,6 +18,7 @@ func updateTimer(state *GameState) {
 	if state.RemainingTime <= 0 {
 		state.RemainingTime = 0
 		state.GameOver = true
+		state.GameOverReason = GameOverTimeExpired
 	}
 }
 

@@ -19,6 +19,7 @@
 ## Safety
 - Do not rewrite unrelated files.
 - Do not introduce work outside the current plan step unless the user asks.
+- Always go for the simplest working solution first.
 - Stick closely to the agreed plan and architecture. If implementation reveals a possible improvement, shortcut, pitfall, or design deviation, raise it to the user before making the change.
 - If `AGENTS.md`, `docs/GOAL.md`, `docs/ARCHITECTURE.md`, and `docs/PLAN.md` conflict, stop and ask the user before proceeding.
 - Treat `docs/GOAL.md` as the source of truth for product intent, `docs/ARCHITECTURE.md` as the source of truth for design decisions, and `docs/PLAN.md` as the source of truth for implementation order.

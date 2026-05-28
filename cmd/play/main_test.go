@@ -38,6 +38,27 @@ func TestParseSelectionRejectsNonInteger(t *testing.T) {
 	}
 }
 
+func TestFormatGameOverReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason game.GameOverReason
+		want   string
+	}{
+		{name: "no valid moves", reason: game.GameOverNoValidMoves, want: "no valid moves"},
+		{name: "time expired", reason: game.GameOverTimeExpired, want: "time expired"},
+		{name: "unknown", reason: game.GameOverNone, want: "unknown reason"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := formatGameOverReason(test.reason)
+			if got != test.want {
+				t.Fatalf("formatGameOverReason(%v) = %q, want %q", test.reason, got, test.want)
+			}
+		})
+	}
+}
+
 func TestRunAppliesMove(t *testing.T) {
 	// NewGame normally initializes this cache. This test uses the public move
 	// path through run, so build a real initialized state instead.

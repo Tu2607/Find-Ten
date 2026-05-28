@@ -38,6 +38,7 @@ func ApplyMove(state *GameState, selection Selection) error {
 	rebuildValidMoveCache(state)
 	if len(state.ValidMoves) == 0 {
 		state.GameOver = true
+		state.GameOverReason = GameOverNoValidMoves
 	}
 
 	return nil

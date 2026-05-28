@@ -34,6 +34,9 @@ func TestRunGameProcessesMoveEvents(t *testing.T) {
 	if !state.GameOver {
 		t.Fatal("state.GameOver = false, want true")
 	}
+	if state.GameOverReason != GameOverNoValidMoves {
+		t.Fatalf("state.GameOverReason = %v, want %v", state.GameOverReason, GameOverNoValidMoves)
+	}
 }
 
 func TestRunGameProcessesTickEvents(t *testing.T) {
@@ -72,6 +75,9 @@ func TestRunGameEndsWhenTimerExpires(t *testing.T) {
 	}
 	if !state.GameOver {
 		t.Fatal("state.GameOver = false, want true")
+	}
+	if state.GameOverReason != GameOverTimeExpired {
+		t.Fatalf("state.GameOverReason = %v, want %v", state.GameOverReason, GameOverTimeExpired)
 	}
 }
 
@@ -149,6 +155,27 @@ func TestRunGameEmitsInitialMoveAndTickSnapshots(t *testing.T) {
 	}
 	if third.RemainingTime != 1 {
 		t.Fatalf("third.RemainingTime = %d, want 1", third.RemainingTime)
+	}
+}
+
+func TestRunGameSnapshotIncludesGameOverReason(t *testing.T) {
+	state := &GameState{
+		RemainingTime: 1,
+	}
+
+	events := make(chan Event, 1)
+	snapshots := make(chan GameSnapshot, 2)
+	events <- NewEvent(EventTick, Selection{})
+
+	RunGame(context.Background(), events, snapshots, state)
+
+	<-snapshots
+	gameOverSnapshot := <-snapshots
+	if !gameOverSnapshot.GameOver {
+		t.Fatal("gameOverSnapshot.GameOver = false, want true")
+	}
+	if gameOverSnapshot.GameOverReason != GameOverTimeExpired {
+		t.Fatalf("gameOverSnapshot.GameOverReason = %v, want %v", gameOverSnapshot.GameOverReason, GameOverTimeExpired)
 	}
 }
 

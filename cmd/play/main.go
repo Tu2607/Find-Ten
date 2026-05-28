@@ -50,7 +50,7 @@ func run(ctx context.Context, input io.Reader, output io.Writer, events chan<- g
 			}
 			printSnapshot(output, snapshot)
 			if snapshot.GameOver {
-				fmt.Fprintln(output, "game over")
+				fmt.Fprintf(output, "game over: %s\n", formatGameOverReason(snapshot.GameOverReason))
 				return
 			}
 			fmt.Fprint(output, "move row1 col1 row2 col2, or q to quit: ")
@@ -160,6 +160,17 @@ func printSnapshot(output io.Writer, snapshot game.GameSnapshot) {
 		snapshot.RemainingTime,
 		snapshot.GameOver,
 	)
+}
+
+func formatGameOverReason(reason game.GameOverReason) string {
+	switch reason {
+	case game.GameOverNoValidMoves:
+		return "no valid moves"
+	case game.GameOverTimeExpired:
+		return "time expired"
+	default:
+		return "unknown reason"
+	}
 }
 
 func printBoard(output io.Writer, board game.Board) {

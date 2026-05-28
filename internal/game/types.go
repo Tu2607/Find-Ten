@@ -22,12 +22,35 @@ type Selection struct {
 	End   Position
 }
 
+type EventType int
+
+// Enum for different event types
+const (
+	EventMove EventType = iota
+	EventTick
+)
+
+type Event struct {
+	Type   EventType
+	Move   Selection
+	Result chan MoveResult
+}
+
+type GameOverReason int
+
+const (
+	GameOverNone GameOverReason = iota
+	GameOverNoValidMoves
+	GameOverTimeExpired
+)
+
 type GameState struct {
-	Board         Board
-	ValidMoves    []Selection
-	Score         int
-	GameOver      bool
-	RemainingTime int
+	Board          Board
+	ValidMoves     []Selection
+	Score          int
+	GameOver       bool
+	GameOverReason GameOverReason
+	RemainingTime  int
 
 	validMoveSet map[Selection]struct{}
 }
@@ -37,6 +60,7 @@ type GameSnapshot struct {
 	Board          Board
 	Score          int
 	GameOver       bool
+	GameOverReason GameOverReason
 	RemainingTime  int
 	ValidMoveCount int
 	SnapshotTime   time.Time
