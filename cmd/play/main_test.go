@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 
 	"find-ten-game/internal/game"
@@ -59,42 +58,72 @@ func TestFormatGameOverReason(t *testing.T) {
 	}
 }
 
-func TestRunAppliesMove(t *testing.T) {
-	// NewGame normally initializes this cache. This test uses the public move
-	// path through run, so build a real initialized state instead.
-	state, err := game.NewGame(game.MinSupportedBoardSize)
+func TestHandleInputLineSubmitsMoveThroughSession(t *testing.T) {
+	session, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize)
 	if err != nil {
-		t.Fatalf("NewGame returned unexpected error: %v", err)
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
-	move := state.ValidMoves[0]
+	defer session.Stop()
+
+	initialSnapshot := <-session.Snapshots()
+	move, ok := findValidSelection(initialSnapshot.Board)
+	if !ok {
+		t.Fatal("findValidSelection returned false, want valid move on initialized board")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	events := make(chan game.Event, 4)
-	snapshots := make(chan game.GameSnapshot, 4)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		game.RunGame(ctx, events, snapshots, state)
-	}()
-
-	input := stringsForTest(move) + "\nq\n"
-	run(ctx, stringsReader(input), discardWriter{}, events, snapshots)
-	close(events)
-	<-done
-
-	if state.Score == 0 {
-		t.Fatal("state.Score = 0, want score after valid move")
+	if ok := handleInputLine(ctx, discardWriter{}, stringsForTest(move), session); !ok {
+		t.Fatal("handleInputLine returned false, want true")
 	}
+
+	moveSnapshot := <-session.Snapshots()
+	if moveSnapshot.Score == 0 {
+		t.Fatal("moveSnapshot.Score = 0, want score after valid move")
+	}
+
+	session.Stop()
+	<-session.Done()
+
+	if err := session.SubmitMove(ctx, move); err == nil {
+		t.Fatal("SubmitMove after stopped session succeeded, want error")
+	}
+}
+
+func findValidSelection(board game.Board) (game.Selection, bool) {
+	for startRow := range board {
+		for startCol := range board[startRow] {
+			for endRow := startRow; endRow < len(board); endRow++ {
+				for endCol := startCol; endCol < len(board[endRow]); endCol++ {
+					selection := game.Selection{
+						Start: game.Position{Row: startRow, Col: startCol},
+						End:   game.Position{Row: endRow, Col: endCol},
+					}
+					if rectangleSum(board, selection) == 10 {
+						return selection, true
+					}
+				}
+			}
+		}
+	}
+
+	return game.Selection{}, false
+}
+
+func rectangleSum(board game.Board, selection game.Selection) int {
+	sum := 0
+	for row := selection.Start.Row; row <= selection.End.Row; row++ {
+		for col := selection.Start.Col; col <= selection.End.Col; col++ {
+			sum += board[row][col]
+		}
+	}
+
+	return sum
 }
 
 func stringsForTest(selection game.Selection) string {
 	return fmt.Sprintf("%d %d %d %d", selection.Start.Row, selection.Start.Col, selection.End.Row, selection.End.Col)
-}
-
-func stringsReader(value string) *strings.Reader {
-	return strings.NewReader(value)
 }
 
 type discardWriter struct{}

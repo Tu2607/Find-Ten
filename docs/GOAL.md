@@ -48,6 +48,8 @@ A move is valid only when the selected rectangle sums to exactly `10`.
 
 Multiples of `10`, such as `20`, are not valid.
 
+An invalid move does not end the game.
+
 Scoring is based on newly cleared cells:
 - each newly cleared non-zero cell is worth `100` points
 - already-cleared `0` cells do not score again

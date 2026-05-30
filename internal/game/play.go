@@ -2,21 +2,88 @@ package game
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"time"
 )
 
-type EventType int
+var ErrSessionClosed = errors.New("game session is closed")
 
-// Enum for different event types
-const (
-	EventMove EventType = iota
-	EventTick
-)
+func NewGameSession(ctx context.Context, size int) (*GameSession, error) {
+	state, err := NewGame(size)
+	if err != nil {
+		return nil, err
+	}
 
-type Event struct {
-	Type   EventType
-	Move   Selection
-	Result chan MoveResult
+	sessionCtx, cancel := context.WithCancel(ctx)
+	session := &GameSession{
+		events:    make(chan Event),
+		snapshots: make(chan GameSnapshot),
+		cancel:    cancel,
+		done:      make(chan struct{}),
+	}
+
+	go session.run(sessionCtx, state)
+
+	return session, nil
+}
+
+func (s *GameSession) run(ctx context.Context, state *GameState) {
+	defer close(s.done)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		RunGame(ctx, s.events, s.snapshots, state)
+		s.Stop()
+	}()
+
+	go func() {
+		defer wg.Done()
+		StartTimer(ctx, s.events)
+	}()
+
+	wg.Wait()
+}
+
+func (s *GameSession) Snapshots() <-chan GameSnapshot {
+	return s.snapshots
+}
+
+func (s *GameSession) SubmitMove(ctx context.Context, selection Selection) error {
+	results := make(chan error, 1)
+	event := Event{
+		Type:   EventMove,
+		Move:   selection,
+		Result: results,
+	}
+
+	select {
+	case s.events <- event:
+	case <-s.done:
+		return ErrSessionClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	select {
+	case err := <-results:
+		return err
+	case <-s.done:
+		return ErrSessionClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *GameSession) Stop() {
+	s.once.Do(s.cancel)
+}
+
+func (s *GameSession) Done() <-chan struct{} {
+	return s.done
 }
 
 func NewEvent(event EventType, move Selection) Event {
@@ -45,12 +112,14 @@ func RunGame(ctx context.Context, events <-chan Event, snapshots chan<- GameSnap
 			switch event.Type {
 			case EventMove:
 				err := ApplyMove(state, event.Move)
-				snapshot := newGameSnapshot(state, sequence)
-				sequence++
 				if event.Result != nil {
-					sendMoveResult(ctx, event.Result, MoveResult{Err: err, Snapshot: snapshot})
+					sendMoveResult(ctx, event.Result, err)
 				}
-				publishPreparedSnapshot(ctx, snapshots, snapshot)
+				if err == nil {
+					snapshot := newGameSnapshot(state, sequence)
+					sequence++
+					publishPreparedSnapshot(ctx, snapshots, snapshot)
+				}
 			case EventTick:
 				updateTimer(state)
 				publishSnapshot(ctx, snapshots, state, &sequence)
@@ -76,7 +145,7 @@ func publishPreparedSnapshot(ctx context.Context, snapshots chan<- GameSnapshot,
 	}
 }
 
-func sendMoveResult(ctx context.Context, results chan<- MoveResult, result MoveResult) {
+func sendMoveResult(ctx context.Context, results chan<- error, result error) {
 	select {
 	case <-ctx.Done():
 	case results <- result:

@@ -117,6 +117,32 @@ This design is slightly more structured than direct state reads with a mutex, bu
 
 The project keeps one input channel for state-changing events. Snapshot delivery uses an output channel, but that channel does not manage state; it only carries immutable views produced by the state owner.
 
+## Game Session Wrapper
+
+The next runtime boundary is a single-game `GameSession`.
+
+`GameSession` is a lifecycle wrapper, not a state owner. It allocates and wires runtime pieces:
+- session context and cancel function
+- event channel
+- snapshot channel
+- timer goroutine
+- game loop goroutine
+- completion signal
+
+`RunGame` remains the only code that mutates `GameState`. It also remains the only producer and closer of the snapshot channel. `GameSession` creates the snapshot channel and exposes its receive side, but it does not write snapshots.
+
+`StartTimer` remains owned by the session lifecycle but still has only one job: produce `EventTick` messages until the session context is canceled. It does not mutate state and does not close the event channel.
+
+The session wrapper should expose a small safe API for callers:
+- receive snapshots
+- submit moves with context-aware result waiting
+- stop the session
+- wait for session completion
+
+This keeps CLI, future HTTP handlers, and future WebSocket handlers from manually wiring channels and goroutines. It also creates a natural path to a later manager that can hold multiple sessions without changing the core game loop.
+
+Multiplayer, session IDs, and API routing are intentionally out of scope for the first `GameSession` step.
+
 ## CLI First
 
 The CLI demo is the first manual testing surface.

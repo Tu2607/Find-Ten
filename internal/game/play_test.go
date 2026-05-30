@@ -207,7 +207,7 @@ func TestRunGameSnapshotBoardIsDeepCopy(t *testing.T) {
 	}
 }
 
-func TestRunGameMoveResultIncludesSnapshot(t *testing.T) {
+func TestRunGameMoveResultReturnsError(t *testing.T) {
 	state := &GameState{
 		Board: Board{
 			{4, 6},
@@ -219,7 +219,7 @@ func TestRunGameMoveResultIncludesSnapshot(t *testing.T) {
 
 	events := make(chan Event, 1)
 	snapshots := make(chan GameSnapshot, 2)
-	results := make(chan MoveResult, 1)
+	results := make(chan error, 1)
 	events <- Event{
 		Type: EventMove,
 		Move: Selection{
@@ -231,15 +231,127 @@ func TestRunGameMoveResultIncludesSnapshot(t *testing.T) {
 
 	RunGame(context.Background(), events, snapshots, state)
 
-	result := <-results
-	if result.Err != nil {
-		t.Fatalf("result.Err = %v, want nil", result.Err)
+	if err := <-results; err != nil {
+		t.Fatalf("move result error = %v, want nil", err)
 	}
-	if result.Snapshot.Sequence != 2 {
-		t.Fatalf("result.Snapshot.Sequence = %d, want 2", result.Snapshot.Sequence)
+
+	<-snapshots
+	moveSnapshot := <-snapshots
+	if moveSnapshot.Sequence != 2 {
+		t.Fatalf("moveSnapshot.Sequence = %d, want 2", moveSnapshot.Sequence)
 	}
-	if result.Snapshot.Score != 200 {
-		t.Fatalf("result.Snapshot.Score = %d, want 200", result.Snapshot.Score)
+	if moveSnapshot.Score != 200 {
+		t.Fatalf("moveSnapshot.Score = %d, want 200", moveSnapshot.Score)
+	}
+}
+
+func TestRunGameInvalidMoveDoesNotEmitSnapshot(t *testing.T) {
+	state := &GameState{
+		Board: Board{
+			{4, 6},
+			{9, 9},
+		},
+		RemainingTime: DefaultGameDurationSeconds,
+	}
+	rebuildValidMoveCache(state)
+
+	events := make(chan Event, 1)
+	snapshots := make(chan GameSnapshot, 2)
+	results := make(chan error, 1)
+	events <- Event{
+		Type: EventMove,
+		Move: Selection{
+			Start: Position{Row: 1, Col: 0},
+			End:   Position{Row: 1, Col: 1},
+		},
+		Result: results,
+	}
+	close(events)
+
+	RunGame(context.Background(), events, snapshots, state)
+
+	if err := <-results; err == nil {
+		t.Fatal("move result error = nil, want invalid move error")
+	}
+
+	<-snapshots
+	_, ok := <-snapshots
+	if ok {
+		t.Fatal("received snapshot after invalid move, want only initial snapshot")
+	}
+}
+
+func TestNewGameSessionEmitsInitialSnapshot(t *testing.T) {
+	session, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+	defer session.Stop()
+
+	snapshot := <-session.Snapshots()
+	if snapshot.Sequence != 1 {
+		t.Fatalf("snapshot.Sequence = %d, want 1", snapshot.Sequence)
+	}
+	if len(snapshot.Board) != MinSupportedBoardSize {
+		t.Fatalf("len(snapshot.Board) = %d, want %d", len(snapshot.Board), MinSupportedBoardSize)
+	}
+	if snapshot.ValidMoveCount == 0 {
+		t.Fatal("snapshot.ValidMoveCount = 0, want at least one valid move")
+	}
+}
+
+func TestGameSessionSubmitMove(t *testing.T) {
+	session, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+	defer session.Stop()
+
+	initialSnapshot := <-session.Snapshots()
+	move, ok := firstValidSelection(initialSnapshot.Board)
+	if !ok {
+		t.Fatal("firstValidSelection returned false, want a valid move")
+	}
+
+	if err := session.SubmitMove(context.Background(), move); err != nil {
+		t.Fatalf("SubmitMove returned unexpected error: %v", err)
+	}
+
+	moveSnapshot := <-session.Snapshots()
+	if moveSnapshot.Score == 0 {
+		t.Fatal("moveSnapshot.Score = 0, want score after valid move")
+	}
+}
+
+func TestGameSessionStopCancelsLifecycle(t *testing.T) {
+	session, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+
+	session.Stop()
+
+	select {
+	case <-session.Done():
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("session did not stop after Stop")
+	}
+}
+
+func TestGameSessionSnapshotsCloseWhenGameEnds(t *testing.T) {
+	session, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+
+	session.Stop()
+	for range session.Snapshots() {
+	}
+
+	select {
+	case <-session.Done():
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("session did not finish after snapshots closed")
 	}
 }
 
@@ -258,4 +370,13 @@ func TestStartTimerSendsTickEvents(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("startTimer did not send EventTick")
 	}
+}
+
+func firstValidSelection(board Board) (Selection, bool) {
+	validMoves, _ := buildValidMoveCache(board)
+	if len(validMoves) == 0 {
+		return Selection{}, false
+	}
+
+	return validMoves[0], true
 }

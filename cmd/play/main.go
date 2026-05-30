@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -17,27 +18,25 @@ func main() {
 	size := flag.Int("size", game.MinSupportedBoardSize, "board size: 9, 10, or 11")
 	flag.Parse()
 
-	state, err := game.NewGame(*size)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	session, err := game.NewGameSession(ctx, *size)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to start game: %v\n", err)
 		os.Exit(1)
 	}
+	defer session.Stop()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	events := make(chan game.Event, 16)
-	snapshots := make(chan game.GameSnapshot, 16)
-
-	go game.RunGame(ctx, events, snapshots, state)
-	go game.StartTimer(ctx, events)
-
-	run(ctx, os.Stdin, os.Stdout, events, snapshots)
+	run(ctx, os.Stdin, os.Stdout, session)
 	cancel()
+	session.Stop()
+	<-session.Done()
 }
 
-func run(ctx context.Context, input io.Reader, output io.Writer, events chan<- game.Event, snapshots <-chan game.GameSnapshot) {
+func run(ctx context.Context, input io.Reader, output io.Writer, session *game.GameSession) {
 	lines := scanLines(ctx, input)
+	snapshots := session.Snapshots()
 
 	for {
 		select {
@@ -60,7 +59,7 @@ func run(ctx context.Context, input io.Reader, output io.Writer, events chan<- g
 				fmt.Fprintln(output)
 				return
 			}
-			if !handleInputLine(ctx, output, line, events) {
+			if !handleInputLine(ctx, output, line, session) {
 				return
 			}
 		}
@@ -85,7 +84,7 @@ func scanLines(ctx context.Context, input io.Reader) <-chan string {
 	return lines
 }
 
-func handleInputLine(ctx context.Context, output io.Writer, line string, events chan<- game.Event) bool {
+func handleInputLine(ctx context.Context, output io.Writer, line string, session *game.GameSession) bool {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return true
@@ -102,29 +101,21 @@ func handleInputLine(ctx context.Context, output io.Writer, line string, events 
 		return true
 	}
 
-	results := make(chan game.MoveResult, 1)
-	event := game.Event{
-		Type:   game.EventMove,
-		Move:   selection,
-		Result: results,
-	}
+	if err := session.SubmitMove(ctx, selection); err != nil {
+		switch {
+		case errors.Is(err, game.ErrInvalidMove), errors.Is(err, game.ErrOutOfBounds):
+			fmt.Fprintf(output, "invalid move: %v\n", err)
+			fmt.Fprint(output, "move row1 col1 row2 col2, or q to quit: ")
+			return true
+		case errors.Is(err, game.ErrGameOver):
+			fmt.Fprintln(output, "game is already over")
+			return false
+		case errors.Is(err, game.ErrSessionClosed), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			return false
+		default:
+			return false
 
-	select {
-	case events <- event:
-	case <-ctx.Done():
-		return false
-	}
-
-	var result game.MoveResult
-	select {
-	case result = <-results:
-	case <-ctx.Done():
-		return false
-	}
-
-	if result.Err != nil {
-		fmt.Fprintf(output, "move rejected: %v\n", result.Err)
-		fmt.Fprint(output, "move row1 col1 row2 col2, or q to quit: ")
+		}
 	}
 
 	return true
@@ -196,4 +187,6 @@ func printBoard(output io.Writer, board game.Board) {
 		}
 		fmt.Fprintln(output)
 	}
+
+	fmt.Fprintln(output) // Newline after board
 }

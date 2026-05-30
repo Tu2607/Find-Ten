@@ -161,6 +161,35 @@ Acceptance:
 - Tests verify snapshots include the game-over reason.
 - Tests verify CLI output reports the reason when the game ends.
 
+## Step 12: Single-Game Session Wrapper
+- Add a `GameSession` wrapper for one running game.
+- `GameSession` owns runtime lifecycle:
+  - context and cancel function
+  - event channel allocation
+  - snapshot channel allocation
+  - timer goroutine startup
+  - game loop goroutine startup
+  - shutdown signaling
+- `RunGame` remains the only game-state mutator.
+- `RunGame` remains the only snapshot producer and the only closer of the snapshot channel.
+- `StartTimer` remains a tick producer only.
+- `GameSession` exposes a safe caller API:
+  - create a session for a board size
+  - receive snapshots
+  - submit a move with context-aware result waiting
+  - stop the session
+  - wait for session completion
+- Refactor the CLI to use `GameSession` instead of manually wiring channels and goroutines.
+- Do not add multiplayer, session IDs, or HTTP/API behavior in this step.
+
+Acceptance:
+- Tests verify `GameSession` starts a game and emits an initial snapshot.
+- Tests verify submitting a move through `GameSession` updates score/board through `RunGame`.
+- Tests verify `Stop` cancels timer/game loop lifecycle cleanly.
+- Tests verify `Snapshots()` closes when `RunGame` exits.
+- Tests verify CLI uses `GameSession` rather than directly creating game event/snapshot channels.
+- Tests verify `go test ./...` and `go test -race ./...` pass.
+
 ## Assumptions
 - Implementation proceeds in the order above.
 - Each step should compile and pass tests before moving to the next.

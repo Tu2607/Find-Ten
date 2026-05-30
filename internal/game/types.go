@@ -1,7 +1,9 @@
 package game
 
 import (
+	"context"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -33,7 +35,7 @@ const (
 type Event struct {
 	Type   EventType
 	Move   Selection
-	Result chan MoveResult
+	Result chan error
 }
 
 type GameOverReason int
@@ -66,9 +68,12 @@ type GameSnapshot struct {
 	SnapshotTime   time.Time
 }
 
-type MoveResult struct {
-	Err      error
-	Snapshot GameSnapshot
+type GameSession struct {
+	events    chan Event
+	snapshots chan GameSnapshot
+	cancel    context.CancelFunc
+	done      chan struct{}
+	once      sync.Once
 }
 
 func IsSupportedBoardSize(size int) bool {

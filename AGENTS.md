@@ -17,6 +17,7 @@
 - Run `go test ./...` after implementation steps.
 
 ## Safety
+- ALWAYS ASK THE DEVELOPERS FOR PERMISSIONS BEFORE MAKING ANY EDITS.
 - Do not rewrite unrelated files.
 - Do not introduce work outside the current plan step unless the user asks.
 - Always go for the simplest working solution first.
