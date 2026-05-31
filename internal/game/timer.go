@@ -5,42 +5,18 @@ import (
 	"time"
 )
 
-// Updates the timer for the game
-func updateTimer(state *GameState) {
-	if state == nil || state.GameOver {
+func startExpiryTimer(ctx context.Context, expiresAt time.Time, expired chan<- struct{}) {
+	timer := time.NewTimer(time.Until(expiresAt))
+	defer timer.Stop()
+	defer close(expired)
+
+	select {
+	case <-ctx.Done():
 		return
-	}
-
-	if state.RemainingTime > 0 {
-		state.RemainingTime--
-	}
-
-	if state.RemainingTime <= 0 {
-		state.RemainingTime = 0
-		state.GameOver = true
-		state.GameOverReason = GameOverTimeExpired
-	}
-}
-
-// Produces a tick event every second
-func StartTimer(ctx context.Context, events chan<- Event) {
-	startTimer(ctx, events, time.Second)
-}
-
-func startTimer(ctx context.Context, events chan<- Event, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
+	case <-timer.C:
 		select {
 		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			select {
-			case <-ctx.Done():
-				return
-			case events <- NewEvent(EventTick, Selection{}):
-			}
+		case expired <- struct{}{}:
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"find-ten-game/internal/game"
 )
@@ -19,22 +20,30 @@ func main() {
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	session, err := game.NewGameSession(ctx, *size)
+	session, initialSnapshot, err := game.NewGameSession(ctx, *size)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to start game: %v\n", err)
 		os.Exit(1)
 	}
 	defer session.Stop()
 
-	run(ctx, os.Stdin, os.Stdout, session)
+	run(ctx, os.Stdin, os.Stdout, session, initialSnapshot)
 	cancel()
 	session.Stop()
 	<-session.Done()
 }
 
-func run(ctx context.Context, input io.Reader, output io.Writer, session *game.GameSession) {
+func run(ctx context.Context, input io.Reader, output io.Writer, session *game.GameSession, initialSnapshot game.GameSnapshot) {
+	expiresAt := session.ExpiresAt()
+
+	printSnapshot(output, initialSnapshot, expiresAt)
+	if initialSnapshot.GameOver {
+		fmt.Fprintf(output, "game over: %s\n", formatGameOverReason(initialSnapshot.GameOverReason))
+		return
+	}
+	fmt.Fprint(output, "move row1 col1 row2 col2, or q to quit: ")
+
 	lines := scanLines(ctx, input)
 	snapshots := session.Snapshots()
 
@@ -47,7 +56,7 @@ func run(ctx context.Context, input io.Reader, output io.Writer, session *game.G
 			if !ok {
 				return
 			}
-			printSnapshot(output, snapshot)
+			printSnapshot(output, snapshot, expiresAt)
 			if snapshot.GameOver {
 				fmt.Fprintf(output, "game over: %s\n", formatGameOverReason(snapshot.GameOverReason))
 				return
@@ -142,19 +151,33 @@ func parseSelection(line string) (game.Selection, error) {
 	}, nil
 }
 
-func printSnapshot(output io.Writer, snapshot game.GameSnapshot) {
+func printSnapshot(output io.Writer, snapshot game.GameSnapshot, expiresAt time.Time) {
 	printBoard(output, snapshot.Board)
-	fmt.Fprintf(output, "seq: %d | score: %d | valid moves: %d | remaining time: %d | game over: %t\n",
+	fmt.Fprintf(output, "seq: %d | score: %d | valid moves: %d | time left: %s | game over: %t\n",
 		snapshot.Sequence,
 		snapshot.Score,
 		snapshot.ValidMoveCount,
-		snapshot.RemainingTime,
+		formatTimeLeft(time.Until(expiresAt)),
 		snapshot.GameOver,
 	)
 }
 
+func formatTimeLeft(remaining time.Duration) string {
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	totalSeconds := int(remaining.Seconds())
+	minutes := totalSeconds / 60
+	seconds := totalSeconds % 60
+
+	return fmt.Sprintf("%02d:%02d", minutes, seconds)
+}
+
 func formatGameOverReason(reason game.GameOverReason) string {
 	switch reason {
+	case game.GameOverBoardCleared:
+		return "board cleared"
 	case game.GameOverNoValidMoves:
 		return "no valid moves"
 	case game.GameOverTimeExpired:

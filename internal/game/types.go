@@ -24,18 +24,9 @@ type Selection struct {
 	End   Position
 }
 
-type EventType int
-
-// Enum for different event types
-const (
-	EventMove EventType = iota
-	EventTick
-)
-
-type Event struct {
-	Type   EventType
-	Move   Selection
-	Result chan error
+type MoveRequest struct {
+	Selection Selection
+	Result    chan error
 }
 
 type GameOverReason int
@@ -44,6 +35,7 @@ const (
 	GameOverNone GameOverReason = iota
 	GameOverNoValidMoves
 	GameOverTimeExpired
+	GameOverBoardCleared
 )
 
 type GameState struct {
@@ -52,7 +44,6 @@ type GameState struct {
 	Score          int
 	GameOver       bool
 	GameOverReason GameOverReason
-	RemainingTime  int
 
 	validMoveSet map[Selection]struct{}
 }
@@ -63,17 +54,23 @@ type GameSnapshot struct {
 	Score          int
 	GameOver       bool
 	GameOverReason GameOverReason
-	RemainingTime  int
 	ValidMoveCount int
 	SnapshotTime   time.Time
 }
 
 type GameSession struct {
-	events    chan Event
+	moves     chan MoveRequest
+	expired   chan struct{}
 	snapshots chan GameSnapshot
+	expiresAt time.Time
 	cancel    context.CancelFunc
 	done      chan struct{}
-	once      sync.Once
+	closing   chan struct{}
+
+	mu       sync.Mutex
+	stopping bool
+	submits  sync.WaitGroup
+	once     sync.Once
 }
 
 func IsSupportedBoardSize(size int) bool {

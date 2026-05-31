@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"find-ten-game/internal/game"
 )
@@ -43,6 +45,7 @@ func TestFormatGameOverReason(t *testing.T) {
 		reason game.GameOverReason
 		want   string
 	}{
+		{name: "board cleared", reason: game.GameOverBoardCleared, want: "board cleared"},
 		{name: "no valid moves", reason: game.GameOverNoValidMoves, want: "no valid moves"},
 		{name: "time expired", reason: game.GameOverTimeExpired, want: "time expired"},
 		{name: "unknown", reason: game.GameOverNone, want: "unknown reason"},
@@ -58,14 +61,34 @@ func TestFormatGameOverReason(t *testing.T) {
 	}
 }
 
+func TestFormatTimeLeft(t *testing.T) {
+	tests := []struct {
+		name      string
+		remaining time.Duration
+		want      string
+	}{
+		{name: "minutes and seconds", remaining: 65 * time.Second, want: "01:05"},
+		{name: "zero", remaining: 0, want: "00:00"},
+		{name: "negative", remaining: -time.Second, want: "00:00"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := formatTimeLeft(test.remaining)
+			if got != test.want {
+				t.Fatalf("formatTimeLeft(%v) = %q, want %q", test.remaining, got, test.want)
+			}
+		})
+	}
+}
+
 func TestHandleInputLineSubmitsMoveThroughSession(t *testing.T) {
-	session, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize)
+	session, initialSnapshot, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
 	defer session.Stop()
 
-	initialSnapshot := <-session.Snapshots()
 	move, ok := findValidSelection(initialSnapshot.Board)
 	if !ok {
 		t.Fatal("findValidSelection returned false, want valid move on initialized board")
@@ -88,6 +111,25 @@ func TestHandleInputLineSubmitsMoveThroughSession(t *testing.T) {
 
 	if err := session.SubmitMove(ctx, move); err == nil {
 		t.Fatal("SubmitMove after stopped session succeeded, want error")
+	}
+}
+
+func TestRunPrintsInitialSnapshot(t *testing.T) {
+	session, initialSnapshot, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+	defer session.Stop()
+
+	var output strings.Builder
+	run(context.Background(), strings.NewReader("q\n"), &output, session, initialSnapshot)
+
+	got := output.String()
+	if !strings.Contains(got, "seq: 1") {
+		t.Fatalf("run output does not include initial snapshot sequence: %q", got)
+	}
+	if !strings.Contains(got, "time left:") {
+		t.Fatalf("run output does not include time left: %q", got)
 	}
 }
 

@@ -19,8 +19,7 @@ func NewGame(size int) (*GameState, error) {
 
 	for attempt := 0; attempt < maxBoardGenerationAttempts; attempt++ {
 		state := &GameState{
-			Board:         randomBoard(size),
-			RemainingTime: DefaultGameDurationSeconds,
+			Board: randomBoard(size),
 		}
 		rebuildValidMoveCache(state)
 
@@ -66,6 +65,18 @@ func countNonZeroCells(selection Selection, board Board) int {
 	}
 
 	return count
+}
+
+func allCellsCleared(board Board) bool {
+	for row := range board {
+		for col := range board[row] {
+			if board[row][col] != 0 {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 func cloneBoard(board Board) Board {

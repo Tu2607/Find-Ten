@@ -156,6 +156,30 @@ func TestApplyMoveRebuildsCacheAndSetsGameOver(t *testing.T) {
 	}
 }
 
+func TestApplyMoveSetsBoardClearedReasonWhenAllCellsAreCleared(t *testing.T) {
+	state := &GameState{
+		Board: Board{
+			{4, 6},
+		},
+	}
+	rebuildValidMoveCache(state)
+
+	err := ApplyMove(state, Selection{
+		Start: Position{Row: 0, Col: 0},
+		End:   Position{Row: 0, Col: 1},
+	})
+	if err != nil {
+		t.Fatalf("ApplyMove returned unexpected error: %v", err)
+	}
+
+	if !state.GameOver {
+		t.Fatal("state.GameOver = false, want true")
+	}
+	if state.GameOverReason != GameOverBoardCleared {
+		t.Fatalf("state.GameOverReason = %v, want %v", state.GameOverReason, GameOverBoardCleared)
+	}
+}
+
 func cloneBoardForTest(board Board) Board {
 	clone := make(Board, len(board))
 	for row := range board {

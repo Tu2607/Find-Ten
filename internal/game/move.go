@@ -36,7 +36,10 @@ func ApplyMove(state *GameState, selection Selection) error {
 	state.Score += clearedCells * pointsPerClearedCell
 
 	rebuildValidMoveCache(state)
-	if len(state.ValidMoves) == 0 {
+	if allCellsCleared(state.Board) {
+		state.GameOver = true
+		state.GameOverReason = GameOverBoardCleared
+	} else if len(state.ValidMoves) == 0 {
 		state.GameOver = true
 		state.GameOverReason = GameOverNoValidMoves
 	}
