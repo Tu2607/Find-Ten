@@ -3,12 +3,14 @@ package api
 import "net/http"
 
 type Server struct {
-	mux *http.ServeMux
+	mux   *http.ServeMux
+	store *sessionStore
 }
 
 func NewServer() http.Handler {
 	server := &Server{
-		mux: http.NewServeMux(),
+		mux:   http.NewServeMux(),
+		store: newSessionStore(),
 	}
 	server.routes()
 
@@ -21,7 +23,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", handleHealth)
-	s.mux.HandleFunc("POST /games", handleNotImplemented)
+	s.mux.HandleFunc("POST /games", s.handleCreateGame)
 	s.mux.HandleFunc("GET /games/{id}/snapshots", handleNotImplemented)
 	s.mux.HandleFunc("POST /games/{id}/moves", handleNotImplemented)
 }
