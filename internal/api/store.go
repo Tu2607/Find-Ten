@@ -12,16 +12,30 @@ const gameIDByteCount = 16
 
 type sessionStore struct {
 	mu       sync.Mutex
-	sessions map[string]*game.GameSession
+	sessions map[string]storedGame
+}
+
+type storedGame struct {
+	session *game.GameSession
+	broker  *snapshotBroker
 }
 
 func newSessionStore() *sessionStore {
 	return &sessionStore{
-		sessions: make(map[string]*game.GameSession),
+		sessions: make(map[string]storedGame),
+	}
+}
+
+func newStoredGame(session *game.GameSession) storedGame {
+	return storedGame{
+		session: session,
+		broker:  newSnapshotBroker(session.Snapshots()),
 	}
 }
 
 func (s *sessionStore) add(session *game.GameSession) (string, error) {
+	stored := newStoredGame(session)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -34,17 +48,17 @@ func (s *sessionStore) add(session *game.GameSession) (string, error) {
 			continue
 		}
 
-		s.sessions[id] = session
+		s.sessions[id] = stored
 		return id, nil
 	}
 }
 
-func (s *sessionStore) get(id string) (*game.GameSession, bool) {
+func (s *sessionStore) get(id string) (storedGame, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	session, ok := s.sessions[id]
-	return session, ok
+	stored, ok := s.sessions[id]
+	return stored, ok
 }
 
 func newGameID() (string, error) {

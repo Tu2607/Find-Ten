@@ -24,6 +24,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", handleHealth)
 	s.mux.HandleFunc("POST /games", s.handleCreateGame)
-	s.mux.HandleFunc("GET /games/{id}/snapshots", handleNotImplemented)
+	s.mux.HandleFunc("GET /games/{id}/snapshots", s.handleGameSnapshots)
 	s.mux.HandleFunc("POST /games/{id}/moves", handleNotImplemented)
 }
