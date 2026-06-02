@@ -24,6 +24,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", handleHealth)
 	s.mux.HandleFunc("POST /games", s.handleCreateGame)
+	s.mux.HandleFunc("GET /games", handleMethodNotAllowed)
 	s.mux.HandleFunc("GET /games/{id}/snapshots", s.handleGameSnapshots)
 	s.mux.HandleFunc("POST /games/{id}/moves", s.handleSubmitMove)
+	s.mux.HandleFunc("GET /games/{id}/moves", handleMethodNotAllowed)
+	s.mux.Handle("GET /", http.FileServer(http.Dir("./static/")))
 }

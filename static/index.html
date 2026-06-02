@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Find Ten</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>Find Ten</h1>
+        <p id="statusText">Choose a board size to start.</p>
+      </div>
+
+      <form id="startForm" class="controls">
+        <label>
+          Size
+          <select id="boardSize">
+            <option value="9">9 x 9</option>
+            <option value="10">10 x 10</option>
+            <option value="11">11 x 11</option>
+          </select>
+        </label>
+        <button type="submit">Start</button>
+      </form>
+    </header>
+
+    <section class="stats" aria-label="Game status">
+      <div>
+        <span>Score</span>
+        <strong id="scoreValue">0</strong>
+      </div>
+      <div>
+        <span>Moves</span>
+        <strong id="movesValue">--</strong>
+      </div>
+      <div>
+        <span>Time</span>
+        <strong id="timeValue">--</strong>
+      </div>
+      <div>
+        <span>Status</span>
+        <strong id="gameValue">Idle</strong>
+      </div>
+    </section>
+
+    <section class="board-panel">
+      <div id="board" class="board empty" aria-label="Game board"></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

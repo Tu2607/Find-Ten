@@ -21,6 +21,10 @@ func handleNotImplemented(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotImplemented, "not implemented")
 }
 
+func handleMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+}
+
 func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request) {
 	var request createGameRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {

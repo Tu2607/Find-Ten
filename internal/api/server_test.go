@@ -104,6 +104,46 @@ func TestServerRouteDispatch(t *testing.T) {
 	}
 }
 
+func TestStaticFiles(t *testing.T) {
+	t.Chdir("../..")
+
+	tests := []struct {
+		name       string
+		path       string
+		wantStatus int
+	}{
+		{
+			name:       "index",
+			path:       "/",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "styles",
+			path:       "/styles.css",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "app",
+			path:       "/app.js",
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	server := NewServer()
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, test.path, nil)
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d", response.Code, test.wantStatus)
+			}
+		})
+	}
+}
+
 func TestCreateGame(t *testing.T) {
 	server := NewServer().(*Server)
 	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(`{"size":9}`))
