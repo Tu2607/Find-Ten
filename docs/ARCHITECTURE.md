@@ -143,6 +143,105 @@ This keeps CLI, future HTTP handlers, and future WebSocket handlers from manuall
 
 Multiplayer, session IDs, and API routing are intentionally out of scope for the first `GameSession` step.
 
+## HTTP API Layer
+
+The HTTP API lives under `internal/api` and is a thin transport boundary over `internal/game`.
+
+The API layer is responsible for:
+- request decoding
+- response encoding
+- route dispatch
+- HTTP status mapping
+- game ID lookup
+- SSE fan-out
+
+The API layer is not responsible for:
+- move validation
+- score calculation
+- game-over detection
+- timer ownership
+- direct `GameState` reads or writes
+
+Handlers must call `GameSession` APIs instead of calling lower-level game functions such as `ApplyMove`. This preserves the actor-style runtime boundary: `RunGame` remains the only code that mutates live game state after a session starts.
+
+## API Endpoints
+
+The API currently exposes:
+
+- `GET /health`
+- `POST /games`
+- `GET /games/{id}/snapshots`
+- `POST /games/{id}/moves`
+
+### Create Game
+
+`POST /games` creates a new single-player game session.
+
+The request body supplies the board size. The handler validates the size through `internal/game`, calls `game.NewGameSession`, stores the session in the API registry, and returns:
+- generated game ID
+- initial snapshot
+- authoritative expiry deadline
+
+The initial snapshot is the bootstrap snapshot returned by `NewGameSession` and has sequence `1`.
+
+The create-game handler intentionally uses `context.Background()` for the game session lifecycle. It must not pass `r.Context()` into `NewGameSession`, because the request context is canceled when the create-game HTTP request finishes. A game session must continue running after the create response is returned.
+
+### API Session Store
+
+The API keeps an in-memory registry of created games:
+
+```text
+gameID -> storedGame
+```
+
+Each stored game contains:
+- the `*game.GameSession`
+- the per-session snapshot broker
+
+The store owns generated opaque game IDs but does not own game rules or game-state mutation. It is a registry and lookup boundary only.
+
+There is currently no persistence and no deletion policy. Created sessions remain in memory until process exit. A future cleanup step can remove completed sessions or add a broader game manager without changing the core game loop.
+
+### Snapshot Stream
+
+`GET /games/{id}/snapshots` opens a Server-Sent Events stream for runtime snapshots.
+
+The initial snapshot is not replayed through SSE. Clients receive that snapshot from `POST /games`.
+
+Runtime snapshots are emitted only after successful moves. Timer countdown changes, invalid moves, rejected moves, and manual stops do not publish board snapshots.
+
+`GameSession.Snapshots()` is a single-consumer channel, so SSE handlers must not read it directly. Each stored game owns one snapshot broker. The broker is the only API-layer consumer of `GameSession.Snapshots()` and fans runtime snapshots out to all current SSE subscribers.
+
+The broker keeps the latest runtime snapshot. New SSE subscribers receive that latest runtime snapshot immediately if one exists. This supports reconnecting or late-attaching clients without replaying the initial creation snapshot.
+
+Subscriber channels are small buffered channels. If a subscriber is slow, the broker drains a stale queued snapshot and attempts to queue the latest snapshot without blocking. This preserves the invariant that a slow client cannot block broker fan-out or `RunGame`.
+
+The broker closes subscriber channels when the source snapshot channel closes. Unknown game IDs return `404 Not Found`; known games whose broker has closed return `410 Gone`.
+
+### Move Submission
+
+`POST /games/{id}/moves` submits one rectangle selection for an existing game.
+
+The request body contains a JSON selection with start and end coordinates. The handler decodes that request into API DTOs, converts the DTO to `game.Selection`, and calls:
+
+```go
+stored.session.SubmitMove(r.Context(), selection)
+```
+
+The move endpoint intentionally uses the HTTP request context because move submission is request-scoped. If the client disconnects or the request is canceled while waiting for the game loop, the handler stops waiting. This does not cancel the game session itself.
+
+The API does not expose or decode `game.MoveRequest` as an HTTP DTO. `MoveRequest` contains runtime plumbing, including the per-move result channel. `GameSession.SubmitMove` owns creation of that runtime request.
+
+Successful move responses are acknowledgements only:
+
+```json
+{ "accepted": true }
+```
+
+Move responses do not include snapshots. Updated board state is delivered through the SSE snapshot stream.
+
+Invalid moves and out-of-bounds selections return `400 Bad Request` and do not end the game. This matches the CLI flow and core game rules. Game-over move submissions return `409 Conflict`; closed sessions return `410 Gone`.
+
 ## CLI First
 
 The CLI demo is the first manual testing surface.

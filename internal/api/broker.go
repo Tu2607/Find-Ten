@@ -86,11 +86,17 @@ func (b *snapshotBroker) publish(snapshot snapshotResponse) {
 		select {
 		case subscriber <- snapshot:
 		default:
+			// Drain a stale queued snapshot before trying to queue the latest one.
 			select {
 			case <-subscriber:
 			default:
 			}
-			subscriber <- snapshot
+
+			// Keep the replacement send non-blocking so a slow subscriber cannot stall fan-out.
+			select {
+			case subscriber <- snapshot:
+			default:
+			}
 		}
 	}
 }

@@ -16,6 +16,24 @@ type createGameResponse struct {
 	ExpiresAt       time.Time        `json:"expiresAt"`
 }
 
+type submitMoveRequest struct {
+	Selection *selectionRequest `json:"selection"`
+}
+
+type selectionRequest struct {
+	Start *positionRequest `json:"start"`
+	End   *positionRequest `json:"end"`
+}
+
+type positionRequest struct {
+	Row *int `json:"row"`
+	Col *int `json:"col"`
+}
+
+type submitMoveResponse struct {
+	Accepted bool `json:"accepted"`
+}
+
 type snapshotResponse struct {
 	Sequence       int64     `json:"sequence"`
 	Board          [][]int   `json:"board"`
@@ -36,4 +54,28 @@ func newSnapshotResponse(snapshot game.GameSnapshot) snapshotResponse {
 		ValidMoveCount: snapshot.ValidMoveCount,
 		SnapshotTime:   snapshot.SnapshotTime,
 	}
+}
+
+// Converts the API move request to a game.Selection. Returns false if the request is invalid.
+func (r submitMoveRequest) toSelection() (game.Selection, bool) {
+	if r.Selection == nil || r.Selection.Start == nil || r.Selection.End == nil {
+		return game.Selection{}, false
+	}
+	if r.Selection.Start.Row == nil || r.Selection.Start.Col == nil {
+		return game.Selection{}, false
+	}
+	if r.Selection.End.Row == nil || r.Selection.End.Col == nil {
+		return game.Selection{}, false
+	}
+
+	return game.Selection{
+		Start: game.Position{
+			Row: *r.Selection.Start.Row,
+			Col: *r.Selection.Start.Col,
+		},
+		End: game.Position{
+			Row: *r.Selection.End.Row,
+			Col: *r.Selection.End.Col,
+		},
+	}, true
 }

@@ -45,10 +45,10 @@ func TestServerRouteDispatch(t *testing.T) {
 			wantStatus: http.StatusNotFound,
 		},
 		{
-			name:       "moves placeholder",
+			name:       "moves unknown game",
 			method:     http.MethodPost,
 			path:       "/games/test-game/moves",
-			wantStatus: http.StatusNotImplemented,
+			wantStatus: http.StatusNotFound,
 		},
 		{
 			name:       "unknown route",
@@ -215,6 +215,205 @@ func TestCreateGameBadRequests(t *testing.T) {
 				t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
 			}
 		})
+	}
+}
+
+func TestSubmitMove(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	move, ok := firstValidSelection(created.response.InitialSnapshot.Board)
+	if !ok {
+		t.Fatal("firstValidSelection returned false, want valid move")
+	}
+
+	response := postMoveForTest(t, server, created.response.GameID, move)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode move response: %v", err)
+	}
+	if accepted, ok := body["accepted"].(bool); !ok || !accepted {
+		t.Fatalf("accepted = %v, want true", body["accepted"])
+	}
+	if _, ok := body["snapshot"]; ok {
+		t.Fatal("move response included snapshot, want acknowledgement only")
+	}
+	if _, ok := body["initialSnapshot"]; ok {
+		t.Fatal("move response included initialSnapshot, want acknowledgement only")
+	}
+}
+
+func TestSubmitMovePublishesSnapshotToSSE(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	testServer := httptest.NewServer(server)
+	defer testServer.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	snapshotRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, testServer.URL+"/games/"+created.response.GameID+"/snapshots", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext returned error: %v", err)
+	}
+
+	snapshotResponse, err := testServer.Client().Do(snapshotRequest)
+	if err != nil {
+		t.Fatalf("GET snapshots returned error: %v", err)
+	}
+	defer snapshotResponse.Body.Close()
+
+	move, ok := firstValidSelection(created.response.InitialSnapshot.Board)
+	if !ok {
+		t.Fatal("firstValidSelection returned false, want valid move")
+	}
+	moveResponse := postMoveHTTPForTest(t, testServer.Client(), testServer.URL, created.response.GameID, move)
+	defer moveResponse.Body.Close()
+	if moveResponse.StatusCode != http.StatusOK {
+		t.Fatalf("move status = %d, want %d", moveResponse.StatusCode, http.StatusOK)
+	}
+
+	event := readSnapshotEvent(t, snapshotResponse.Body)
+	if event.Sequence != 2 {
+		t.Fatalf("event.Sequence = %d, want 2", event.Sequence)
+	}
+}
+
+func TestSubmitMoveUnknownGameReturnsNotFound(t *testing.T) {
+	server := NewServer().(*Server)
+	response := postMoveForTest(t, server, "missing", game.Selection{})
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestSubmitMoveBadRequests(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "invalid JSON",
+			body: `{"selection":`,
+		},
+		{
+			name: "missing selection",
+			body: `{}`,
+		},
+		{
+			name: "missing start",
+			body: `{"selection":{"end":{"row":0,"col":1}}}`,
+		},
+		{
+			name: "missing end",
+			body: `{"selection":{"start":{"row":0,"col":0}}}`,
+		},
+		{
+			name: "missing start row",
+			body: `{"selection":{"start":{"col":0},"end":{"row":0,"col":1}}}`,
+		},
+		{
+			name: "missing start col",
+			body: `{"selection":{"start":{"row":0},"end":{"row":0,"col":1}}}`,
+		},
+		{
+			name: "missing end row",
+			body: `{"selection":{"start":{"row":0,"col":0},"end":{"col":1}}}`,
+		},
+		{
+			name: "missing end col",
+			body: `{"selection":{"start":{"row":0,"col":0},"end":{"row":0}}}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := NewServer().(*Server)
+			created := createGameForTest(t, server, 9)
+			defer created.stored.session.Stop()
+
+			request := httptest.NewRequest(http.MethodPost, "/games/"+created.response.GameID+"/moves", strings.NewReader(test.body))
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func TestSubmitMoveOutOfBoundsReturnsBadRequest(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	response := postMoveForTest(t, server, created.response.GameID, game.Selection{
+		Start: game.Position{Row: 99, Col: 99},
+		End:   game.Position{Row: 99, Col: 99},
+	})
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+func TestSubmitMoveInvalidMoveReturnsBadRequestAndDoesNotEndGame(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	invalid := game.Selection{
+		Start: game.Position{Row: 0, Col: 0},
+		End:   game.Position{Row: 0, Col: 0},
+	}
+	response := postMoveForTest(t, server, created.response.GameID, invalid)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid move status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+
+	valid, ok := firstValidSelection(created.response.InitialSnapshot.Board)
+	if !ok {
+		t.Fatal("firstValidSelection returned false, want valid move")
+	}
+	response = postMoveForTest(t, server, created.response.GameID, valid)
+	if response.Code != http.StatusOK {
+		t.Fatalf("valid move after invalid move status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
+
+func TestSubmitMoveStoppedSessionReturnsGone(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	created.stored.session.Stop()
+
+	move, ok := firstValidSelection(created.response.InitialSnapshot.Board)
+	if !ok {
+		t.Fatal("firstValidSelection returned false, want valid move")
+	}
+	response := postMoveForTest(t, server, created.response.GameID, move)
+
+	if response.Code != http.StatusGone {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusGone)
+	}
+}
+
+func TestWriteMoveErrorMapsGameOverToConflict(t *testing.T) {
+	response := httptest.NewRecorder()
+
+	writeMoveError(response, game.ErrGameOver)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusConflict)
 	}
 }
 
@@ -430,6 +629,40 @@ func rectangleSumForTest(board [][]int, selection game.Selection) int {
 	}
 
 	return sum
+}
+
+func postMoveForTest(t *testing.T, server http.Handler, gameID string, selection game.Selection) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodPost, "/games/"+gameID+"/moves", strings.NewReader(moveJSONForTest(selection)))
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	return response
+}
+
+func postMoveHTTPForTest(t *testing.T, client *http.Client, serverURL string, gameID string, selection game.Selection) *http.Response {
+	t.Helper()
+
+	response, err := client.Post(serverURL+"/games/"+gameID+"/moves", "application/json", strings.NewReader(moveJSONForTest(selection)))
+	if err != nil {
+		t.Fatalf("POST move returned error: %v", err)
+	}
+
+	return response
+}
+
+func moveJSONForTest(selection game.Selection) string {
+	return `{"selection":{"start":{"row":` +
+		strconv.Itoa(selection.Start.Row) +
+		`,"col":` +
+		strconv.Itoa(selection.Start.Col) +
+		`},"end":{"row":` +
+		strconv.Itoa(selection.End.Row) +
+		`,"col":` +
+		strconv.Itoa(selection.End.Col) +
+		`}}}`
 }
 
 func assertNoSSELineWithin(t *testing.T, body io.Reader, duration time.Duration) {

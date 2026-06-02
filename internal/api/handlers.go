@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -60,6 +61,44 @@ func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
+func (s *Server) handleSubmitMove(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	stored, ok := s.store.get(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "game not found")
+		return
+	}
+
+	// Decode the request body into a submitMoveRequest struct
+	// This means the client must send a JSON body like:
+	// {
+	//   "selection": {
+	//     "start": {"row": 0, "col": 0},
+	//     "end": {"row": 0, "col": 1}
+	//   }
+	// }
+	var request submitMoveRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	selection, ok := request.toSelection()
+	if !ok {
+		writeError(w, http.StatusBadRequest, "selection is required")
+		return
+	}
+
+	if err := stored.session.SubmitMove(r.Context(), selection); err != nil {
+		writeMoveError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(submitMoveResponse{Accepted: true})
+}
+
 func (s *Server) handleGameSnapshots(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	stored, ok := s.store.get(id)
@@ -115,4 +154,21 @@ func writeSnapshotEvent(w io.Writer, snapshot snapshotResponse) error {
 	}
 
 	return nil
+}
+
+func writeMoveError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, game.ErrInvalidMove), errors.Is(err, game.ErrOutOfBounds):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, game.ErrGameOver):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, game.ErrSessionClosed):
+		writeError(w, http.StatusGone, err.Error())
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		writeError(w, http.StatusRequestTimeout, err.Error())
+	case errors.Is(err, game.ErrUninitializedMove), errors.Is(err, game.ErrNilGameState):
+		writeError(w, http.StatusInternalServerError, err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, "failed to submit move")
+	}
 }
