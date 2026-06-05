@@ -12,6 +12,7 @@ var (
 	ErrUninitializedMove    = errors.New("valid move cache is uninitialized")
 	ErrReshuffleAlreadyUsed = errors.New("reshuffle already used")
 	ErrReshuffleFailed      = errors.New("failed to generate reshuffled board")
+	ErrUnknownPlayerAction  = errors.New("unknown player action")
 )
 
 func ApplyMove(state *GameState, selection Selection) error {

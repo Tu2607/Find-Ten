@@ -24,7 +24,15 @@ type Selection struct {
 	End   Position
 }
 
-type MoveRequest struct {
+type PlayerActionType int
+
+const (
+	PlayerActionMove PlayerActionType = iota + 1
+	PlayerActionReshuffle
+)
+
+type PlayerActionRequest struct {
+	Type      PlayerActionType
 	Selection Selection
 	Result    chan error
 }
@@ -56,11 +64,12 @@ type GameSnapshot struct {
 	GameOver       bool
 	GameOverReason GameOverReason
 	ValidMoveCount int
+	ReshuffleUsed  bool
 	SnapshotTime   time.Time
 }
 
 type GameSession struct {
-	moves     chan MoveRequest
+	actions   chan PlayerActionRequest
 	expired   chan struct{}
 	snapshots chan GameSnapshot
 	expiresAt time.Time
