@@ -81,10 +81,45 @@ The project keeps prefix sums for now to test the suggested optimization and to 
 The planned runtime model is a single-owner game loop.
 
 One goroutine owns game state and processes runtime signals serially:
-- move requests
+- player action requests
 - timer-expiry signals
 
 This avoids race-prone shared mutation and creates a direct path to future WebSocket and multiplayer support.
+
+## Player Actions
+
+Player actions are user-triggered commands that may mutate authoritative game state.
+
+The runtime uses a single player action request channel for these commands. This keeps all player-triggered state mutations serialized through `RunGame` without reintroducing timer countdown traffic into the same channel.
+
+The initial player action types are:
+- rectangle move
+- reshuffle skill
+
+The request shape should include an enum-like action type, the data needed by that action, and an error-only result channel. For example:
+
+```go
+type PlayerActionType int
+
+const (
+	PlayerActionMove PlayerActionType = iota + 1
+	PlayerActionReshuffle
+)
+
+type PlayerActionRequest struct {
+	Type      PlayerActionType
+	Selection Selection
+	Result    chan error
+}
+```
+
+`Selection` is meaningful only for rectangle move actions. Reshuffle actions do not require selection data.
+
+`RunGame` is the only consumer of the player action channel. It switches on the action type, applies the requested mutation before the session deadline, sends the result through the action result channel, and publishes a snapshot only when the action succeeds.
+
+Rejected player actions do not publish snapshots. Unknown action types are programming errors and should return an internal action error without mutating the board.
+
+Timer expiry remains a separate one-shot runtime signal. It is not a player action and does not publish a board snapshot by itself.
 
 ## State Sharing And Snapshots
 
@@ -94,11 +129,11 @@ The project will expose hard-copy `GameSnapshot` values for display and future n
 
 Snapshots are emitted for:
 - initial game start
-- successful move requests
+- successful player actions
 
 Timer countdown changes do not produce board snapshots. The session stores an authoritative expiry deadline, and the UI can derive countdown display from that session-level metadata when a UI/API layer exposes it. Timer expiry is a terminal runtime signal, not a board-state update, so it does not emit a final board snapshot by itself.
 
-Snapshot ordering uses a local sequence counter owned by the runtime. The initial bootstrap snapshot returned by `NewGameSession` has sequence `1`. Runtime snapshots emitted by `RunGame` start at sequence `2` and increment with each successful move snapshot. The sequence does not belong on `GameState`; it is runtime stream metadata. A future game manager or match session can own this counter when the runtime grows beyond a single loop function.
+Snapshot ordering uses a local sequence counter owned by the runtime. The initial bootstrap snapshot returned by `NewGameSession` has sequence `1`. Runtime snapshots emitted by `RunGame` start at sequence `2` and increment with each successful player action snapshot. The sequence does not belong on `GameState`; it is runtime stream metadata. A future game manager or match session can own this counter when the runtime grows beyond a single loop function.
 
 Snapshots may also include a timestamp. The timestamp helps clients estimate display freshness or smooth a countdown, while the sequence is the authoritative ordering signal.
 
@@ -107,14 +142,14 @@ Snapshots may also include a timestamp. The timestamp helps clients estimate dis
 A mutex-based design could protect shared `GameState` reads and writes. That would work for a small CLI, but it spreads lock discipline across every caller. Future HTTP handlers, WebSocket clients, timers, tests, and multiplayer code would all need to remember to lock before touching state.
 
 The chosen design is actor-style ownership:
-- producers send move requests or timer-expiry signals
+- producers send player action requests or timer-expiry signals
 - `RunGame` serially processes events
 - `RunGame` owns all state reads and writes
 - callers receive snapshots instead of shared mutable state
 
 This design is slightly more structured than direct state reads with a mutex, but it better matches the planned web backend. It gives future move submission, spectator views, replay verification, and multiplayer match loops a single authoritative path for state changes and state views.
 
-The project keeps separate runtime channels for move requests and timer expiry. Snapshot delivery uses an output channel, but that channel does not manage state; it only carries immutable views produced by the state owner.
+The project keeps separate runtime channels for player action requests and timer expiry. Snapshot delivery uses an output channel, but that channel does not manage state; it only carries immutable views produced by the state owner.
 
 ## Game Session Wrapper
 
@@ -122,7 +157,7 @@ The next runtime boundary is a single-game `GameSession`.
 
 `GameSession` is a lifecycle wrapper, not a state owner. It allocates and wires runtime pieces:
 - session context and cancel function
-- move request channel
+- player action request channel
 - timer expiry channel
 - snapshot channel
 - timer goroutine
@@ -131,11 +166,11 @@ The next runtime boundary is a single-game `GameSession`.
 
 `RunGame` remains the only code that mutates `GameState`. It also remains the only producer and closer of the snapshot channel. `GameSession` creates the snapshot channel and exposes its receive side, but it does not write snapshots.
 
-The timer remains owned by the session lifecycle but has only one job: signal once when the session deadline expires. It does not mutate game state and does not send through the move request channel.
+The timer remains owned by the session lifecycle but has only one job: signal once when the session deadline expires. It does not mutate game state and does not send through the player action request channel.
 
 The session wrapper should expose a small safe API for callers:
 - receive snapshots
-- submit moves with context-aware result waiting
+- submit player actions with context-aware result waiting
 - stop the session
 - wait for session completion
 
@@ -208,7 +243,7 @@ There is currently no persistence and no deletion policy. Created sessions remai
 
 The initial snapshot is not replayed through SSE. Clients receive that snapshot from `POST /games`.
 
-Runtime snapshots are emitted only after successful moves. Timer countdown changes, invalid moves, rejected moves, and manual stops do not publish board snapshots.
+Runtime snapshots are emitted only after successful player actions. Timer countdown changes, invalid actions, rejected actions, and manual stops do not publish board snapshots.
 
 `GameSession.Snapshots()` is a single-consumer channel, so SSE handlers must not read it directly. Each stored game owns one snapshot broker. The broker is the only API-layer consumer of `GameSession.Snapshots()` and fans runtime snapshots out to all current SSE subscribers.
 
@@ -230,7 +265,7 @@ stored.session.SubmitMove(r.Context(), selection)
 
 The move endpoint intentionally uses the HTTP request context because move submission is request-scoped. If the client disconnects or the request is canceled while waiting for the game loop, the handler stops waiting. This does not cancel the game session itself.
 
-The API does not expose or decode `game.MoveRequest` as an HTTP DTO. `MoveRequest` contains runtime plumbing, including the per-move result channel. `GameSession.SubmitMove` owns creation of that runtime request.
+The API does not expose or decode `game.PlayerActionRequest` as an HTTP DTO. `PlayerActionRequest` contains runtime plumbing, including the per-action result channel. `GameSession.SubmitMove` owns creation of the move action request.
 
 Successful move responses are acknowledgements only:
 
@@ -250,11 +285,11 @@ The CLI is not a separate rules implementation. It is a thin client over `intern
 
 The CLI wiring has three channels:
 - an input line channel fed by a scanner goroutine
-- the move request channel consumed by `RunGame`
+- the player action request channel consumed by `RunGame`
 - the snapshot channel produced by `RunGame`
 
-The CLI does not call `ApplyMove` directly after the game loop starts. It parses input into a `Selection`, submits a move through `GameSession`, waits for the per-move result channel, and renders state from snapshots.
+The CLI does not call game mutation functions directly after the game loop starts. It parses input into a player action, submits that action through `GameSession`, waits for the per-action result channel, and renders state from snapshots.
 
-Move result waits are context-aware. If the game context is canceled before a result is sent, the CLI stops waiting instead of blocking forever. Per-move result channels are one-shot response channels: they may receive at most one result and are not closed.
+Action result waits are context-aware. If the game context is canceled before a result is sent, the CLI stops waiting instead of blocking forever. Per-action result channels are one-shot response channels: they may receive at most one result and are not closed.
 
-Snapshot rendering is also event-driven. The CLI prints the initial snapshot, then prints later snapshots emitted after successful moves. This keeps display reads out of shared mutable `GameState` and makes the CLI a useful concurrency demo rather than a shortcut around the backend architecture.
+Snapshot rendering is also event-driven. The CLI prints the initial snapshot, then prints later snapshots emitted after successful player actions. This keeps display reads out of shared mutable `GameState` and makes the CLI a useful concurrency demo rather than a shortcut around the backend architecture.

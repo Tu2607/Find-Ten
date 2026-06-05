@@ -44,6 +44,7 @@ type GameState struct {
 	Score          int
 	GameOver       bool
 	GameOverReason GameOverReason
+	ReshuffleUsed  bool
 
 	validMoveSet map[Selection]struct{}
 }

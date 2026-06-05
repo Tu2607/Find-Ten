@@ -5,11 +5,13 @@ import "errors"
 const pointsPerClearedCell = 100
 
 var (
-	ErrGameOver          = errors.New("game is over")
-	ErrInvalidMove       = errors.New("invalid move")
-	ErrOutOfBounds       = errors.New("selection is out of bounds")
-	ErrNilGameState      = errors.New("game state is nil")
-	ErrUninitializedMove = errors.New("valid move cache is uninitialized")
+	ErrGameOver             = errors.New("game is over")
+	ErrInvalidMove          = errors.New("invalid move")
+	ErrOutOfBounds          = errors.New("selection is out of bounds")
+	ErrNilGameState         = errors.New("game state is nil")
+	ErrUninitializedMove    = errors.New("valid move cache is uninitialized")
+	ErrReshuffleAlreadyUsed = errors.New("reshuffle already used")
+	ErrReshuffleFailed      = errors.New("failed to generate reshuffled board")
 )
 
 func ApplyMove(state *GameState, selection Selection) error {
