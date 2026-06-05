@@ -2,7 +2,7 @@
 
 This file is now used as both a record of completed work and a tracker for planned future work. Completed steps document what has already been built; upcoming steps document the next agreed implementation direction.
 
-Current step: Step 20 is planned. Implementation has not started.
+Current step: none. Step 20 is complete and the next step is not yet planned.
 
 ## Step 1: Project Scaffold - Done
 - Create `go.mod` with module name `find-ten-game`.
@@ -1189,11 +1189,13 @@ Manual/browser verification should cover:
 - Run `go test ./...`.
 - Manually run the server and verify the WebUI in a browser.
 
-## Step 20: Player Action Channel and Once-Per-Session Reshuffle Skill - Planned
+## Step 20: Player Action Channel and Once-Per-Session Reshuffle Skill - Done
 
 Add the first backend gameplay skill: a once-per-session reshuffle that preserves the number of cleared cells. This step also generalizes the current move-only runtime channel into a player action channel so rectangle moves and reshuffles share the same actor-owned state mutation path.
 
 Planning note: after defining this feature, earlier forward-looking runtime wording was revised from move-only requests to player action requests where appropriate. Completed historical step descriptions still document the work as it was originally planned, but the current architecture and Step 20 use the broader player action terminology.
+
+Completion note: Step 20 was implemented across backend game rules, runtime/session wiring, API, CLI, and the static WebUI. The final implementation reuses the existing selection-scoped `countNonZeroCells` helper with a full-board selection instead of adding a separate `countNonZeroBoardCells` helper. The WebUI exposes reshuffle with a pending/used disabled state and hides the visible valid-move count to avoid confusing players when valid rectangles include cleared `0` cells.
 
 ### Design Intent
 

@@ -5,6 +5,8 @@ const state = {
   gameOver: false,
   gameOverReason: 0,
   gameOverPopupShown: false,
+  reshuffleUsed: false,
+  reshufflePending: false,
   selectedStart: null,
   hoverCell: null,
   expiresAt: null,
@@ -14,15 +16,17 @@ const state = {
 
 const boardEl = document.getElementById("board");
 const scoreEl = document.getElementById("scoreValue");
-const movesEl = document.getElementById("movesValue");
 const timeEl = document.getElementById("timeValue");
 const gameEl = document.getElementById("gameValue");
 const statusEl = document.getElementById("statusText");
+const reshuffleButtonEl = document.getElementById("reshuffleButton");
 
 document.getElementById("startForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   await startGame(Number(document.getElementById("boardSize").value));
 });
+
+reshuffleButtonEl.addEventListener("click", submitReshuffle);
 
 async function startGame(size) {
   closeStream();
@@ -55,6 +59,8 @@ async function startGame(size) {
   state.selectedStart = null;
   state.hoverCell = null;
   state.gameOverPopupShown = false;
+  state.reshuffleUsed = false;
+  state.reshufflePending = false;
 
   applySnapshot(game.initialSnapshot);
   openSnapshots(game.gameId);
@@ -80,6 +86,8 @@ function applySnapshot(snapshot) {
   state.score = snapshot.score;
   state.gameOver = snapshot.gameOver;
   state.gameOverReason = snapshot.gameOverReason;
+  state.reshuffleUsed = Boolean(snapshot.reshuffleUsed);
+  state.reshufflePending = false;
   state.selectedStart = null;
   state.hoverCell = null;
 
@@ -90,8 +98,8 @@ function applySnapshot(snapshot) {
   }
 
   scoreEl.textContent = state.score;
-  movesEl.textContent = snapshot.validMoveCount;
   gameEl.textContent = state.gameOver ? gameOverText(state.gameOverReason) : "Playing";
+  updateReshuffleButton();
   maybeShowGameOver(snapshot);
   renderBoard();
 }
@@ -138,6 +146,52 @@ function renderBoard() {
   });
 
   updateSelectionPreview();
+}
+
+async function submitReshuffle() {
+  if (!state.gameId || state.gameOver || state.reshuffleUsed || state.reshufflePending) {
+    return;
+  }
+
+  state.reshufflePending = true;
+  state.selectedStart = null;
+  state.hoverCell = null;
+  updateSelectionPreview();
+  updateReshuffleButton();
+  setStatus("Reshuffling board...");
+
+  let response;
+  try {
+    response = await fetch(`/games/${state.gameId}/reshuffle`, {
+      method: "POST"
+    });
+  } catch {
+    state.reshufflePending = false;
+    updateReshuffleButton();
+    setStatus("Could not reshuffle.");
+    return;
+  }
+
+  if (response.ok) {
+    setStatus("Reshuffle accepted.");
+    return;
+  }
+
+  state.reshufflePending = false;
+  if (response.status === 409 || response.status === 410) {
+    state.reshuffleUsed = true;
+    if (response.status === 410) {
+      state.gameOver = true;
+      gameEl.textContent = "Ended";
+      renderBoard();
+    }
+    updateReshuffleButton();
+    setStatus(response.status === 409 ? "Reshuffle unavailable." : "Game ended.");
+    return;
+  }
+
+  updateReshuffleButton();
+  setStatus("Reshuffle failed.");
 }
 
 async function handleCellClick(row, col) {
@@ -252,6 +306,7 @@ function renderCountdown() {
     state.gameOver = true;
     gameEl.textContent = "Expired";
     setStatus("Time expired.");
+    updateReshuffleButton();
     renderBoard();
   }
 }
@@ -272,6 +327,22 @@ function closeStream() {
 
 function setStatus(message) {
   statusEl.textContent = message;
+}
+
+function updateReshuffleButton() {
+  const disabled = !state.gameId || state.gameOver || state.reshuffleUsed || state.reshufflePending;
+  reshuffleButtonEl.disabled = disabled;
+
+  if (state.reshufflePending) {
+    reshuffleButtonEl.textContent = "Reshuffling";
+    return;
+  }
+  if (state.reshuffleUsed) {
+    reshuffleButtonEl.textContent = "Used";
+    return;
+  }
+
+  reshuffleButtonEl.textContent = "Reshuffle";
 }
 
 function gameOverText(reason) {

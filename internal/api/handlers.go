@@ -103,6 +103,24 @@ func (s *Server) handleSubmitMove(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(submitMoveResponse{Accepted: true})
 }
 
+func (s *Server) handleSubmitReshuffle(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	stored, ok := s.store.get(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "game not found")
+		return
+	}
+
+	if err := stored.session.SubmitReshuffle(r.Context()); err != nil {
+		writeMoveError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(submitMoveResponse{Accepted: true})
+}
+
 func (s *Server) handleGameSnapshots(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	stored, ok := s.store.get(id)
@@ -166,11 +184,13 @@ func writeMoveError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, game.ErrGameOver):
 		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, game.ErrReshuffleAlreadyUsed):
+		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, game.ErrSessionClosed):
 		writeError(w, http.StatusGone, err.Error())
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		writeError(w, http.StatusRequestTimeout, err.Error())
-	case errors.Is(err, game.ErrUninitializedMove), errors.Is(err, game.ErrNilGameState):
+	case errors.Is(err, game.ErrUninitializedMove), errors.Is(err, game.ErrNilGameState), errors.Is(err, game.ErrUnknownPlayerAction), errors.Is(err, game.ErrReshuffleFailed):
 		writeError(w, http.StatusInternalServerError, err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, "failed to submit move")

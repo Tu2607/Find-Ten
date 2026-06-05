@@ -51,6 +51,12 @@ func TestServerRouteDispatch(t *testing.T) {
 			wantStatus: http.StatusNotFound,
 		},
 		{
+			name:       "reshuffle unknown game",
+			method:     http.MethodPost,
+			path:       "/games/test-game/reshuffle",
+			wantStatus: http.StatusNotFound,
+		},
+		{
 			name:       "unknown route",
 			method:     http.MethodGet,
 			path:       "/missing",
@@ -78,6 +84,12 @@ func TestServerRouteDispatch(t *testing.T) {
 			name:       "unsupported moves method",
 			method:     http.MethodGet,
 			path:       "/games/test-game/moves",
+			wantStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:       "unsupported reshuffle method",
+			method:     http.MethodGet,
+			path:       "/games/test-game/reshuffle",
 			wantStatus: http.StatusMethodNotAllowed,
 		},
 	}
@@ -164,6 +176,9 @@ func TestCreateGame(t *testing.T) {
 	}
 	if body.InitialSnapshot.Sequence != 1 {
 		t.Fatalf("InitialSnapshot.Sequence = %d, want 1", body.InitialSnapshot.Sequence)
+	}
+	if body.InitialSnapshot.ReshuffleUsed {
+		t.Fatal("InitialSnapshot.ReshuffleUsed = true, want false")
 	}
 	if body.ExpiresAt.IsZero() {
 		t.Fatal("ExpiresAt is zero, want session deadline")
@@ -323,6 +338,108 @@ func TestSubmitMovePublishesSnapshotToSSE(t *testing.T) {
 	event := readSnapshotEvent(t, snapshotResponse.Body)
 	if event.Sequence != 2 {
 		t.Fatalf("event.Sequence = %d, want 2", event.Sequence)
+	}
+}
+
+func TestSubmitReshuffle(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	response := postReshuffleForTest(t, server, created.response.GameID)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode reshuffle response: %v", err)
+	}
+	if accepted, ok := body["accepted"].(bool); !ok || !accepted {
+		t.Fatalf("accepted = %v, want true", body["accepted"])
+	}
+	if _, ok := body["snapshot"]; ok {
+		t.Fatal("reshuffle response included snapshot, want acknowledgement only")
+	}
+	if _, ok := body["initialSnapshot"]; ok {
+		t.Fatal("reshuffle response included initialSnapshot, want acknowledgement only")
+	}
+}
+
+func TestSubmitReshufflePublishesSnapshotToSSE(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	testServer := httptest.NewServer(server)
+	defer testServer.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	snapshotRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, testServer.URL+"/games/"+created.response.GameID+"/snapshots", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext returned error: %v", err)
+	}
+
+	snapshotResponse, err := testServer.Client().Do(snapshotRequest)
+	if err != nil {
+		t.Fatalf("GET snapshots returned error: %v", err)
+	}
+	defer snapshotResponse.Body.Close()
+
+	reshuffleResponse := postReshuffleHTTPForTest(t, testServer.Client(), testServer.URL, created.response.GameID)
+	defer reshuffleResponse.Body.Close()
+	if reshuffleResponse.StatusCode != http.StatusOK {
+		t.Fatalf("reshuffle status = %d, want %d", reshuffleResponse.StatusCode, http.StatusOK)
+	}
+
+	event := readSnapshotEvent(t, snapshotResponse.Body)
+	if event.Sequence != 2 {
+		t.Fatalf("event.Sequence = %d, want 2", event.Sequence)
+	}
+	if !event.ReshuffleUsed {
+		t.Fatal("event.ReshuffleUsed = false, want true")
+	}
+	if got, want := countZeroCellsForTest(event.Board), countZeroCellsForTest(created.response.InitialSnapshot.Board); got != want {
+		t.Fatalf("reshuffled zero count = %d, want %d", got, want)
+	}
+}
+
+func TestSubmitReshuffleUnknownGameReturnsNotFound(t *testing.T) {
+	server := NewServer().(*Server)
+	response := postReshuffleForTest(t, server, "missing")
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestSubmitReshuffleAlreadyUsedReturnsConflict(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	response := postReshuffleForTest(t, server, created.response.GameID)
+	if response.Code != http.StatusOK {
+		t.Fatalf("first reshuffle status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	response = postReshuffleForTest(t, server, created.response.GameID)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("second reshuffle status = %d, want %d", response.Code, http.StatusConflict)
+	}
+}
+
+func TestSubmitReshuffleStoppedSessionReturnsGone(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	created.stored.session.Stop()
+
+	response := postReshuffleForTest(t, server, created.response.GameID)
+
+	if response.Code != http.StatusGone {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusGone)
 	}
 }
 
@@ -693,6 +810,28 @@ func postMoveHTTPForTest(t *testing.T, client *http.Client, serverURL string, ga
 	return response
 }
 
+func postReshuffleForTest(t *testing.T, server http.Handler, gameID string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodPost, "/games/"+gameID+"/reshuffle", nil)
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	return response
+}
+
+func postReshuffleHTTPForTest(t *testing.T, client *http.Client, serverURL string, gameID string) *http.Response {
+	t.Helper()
+
+	response, err := client.Post(serverURL+"/games/"+gameID+"/reshuffle", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST reshuffle returned error: %v", err)
+	}
+
+	return response
+}
+
 func moveJSONForTest(selection game.Selection) string {
 	return `{"selection":{"start":{"row":` +
 		strconv.Itoa(selection.Start.Row) +
@@ -703,6 +842,19 @@ func moveJSONForTest(selection game.Selection) string {
 		`,"col":` +
 		strconv.Itoa(selection.End.Col) +
 		`}}}`
+}
+
+func countZeroCellsForTest(board [][]int) int {
+	count := 0
+	for row := range board {
+		for col := range board[row] {
+			if board[row][col] == 0 {
+				count++
+			}
+		}
+	}
+
+	return count
 }
 
 func assertNoSSELineWithin(t *testing.T, body io.Reader, duration time.Duration) {

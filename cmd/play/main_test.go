@@ -114,6 +114,52 @@ func TestHandleInputLineSubmitsMoveThroughSession(t *testing.T) {
 	}
 }
 
+func TestHandleInputLineSubmitsReshuffleThroughSession(t *testing.T) {
+	session, initialSnapshot, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+	defer session.Stop()
+
+	beforeZeroCount := countZeroCells(initialSnapshot.Board)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if ok := handleInputLine(ctx, discardWriter{}, "reshuffle", session); !ok {
+		t.Fatal("handleInputLine returned false, want true")
+	}
+
+	snapshot := <-session.Snapshots()
+	if !snapshot.ReshuffleUsed {
+		t.Fatal("snapshot.ReshuffleUsed = false, want true")
+	}
+	if got := countZeroCells(snapshot.Board); got != beforeZeroCount {
+		t.Fatalf("zero count = %d, want %d", got, beforeZeroCount)
+	}
+}
+
+func TestHandleInputLineAlreadyUsedReshuffleKeepsRunning(t *testing.T) {
+	session, _, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+	defer session.Stop()
+
+	if err := session.SubmitReshuffle(context.Background()); err != nil {
+		t.Fatalf("SubmitReshuffle returned unexpected error: %v", err)
+	}
+	<-session.Snapshots()
+
+	var output strings.Builder
+	if ok := handleInputLine(context.Background(), &output, "reshuffle", session); !ok {
+		t.Fatal("handleInputLine returned false, want true")
+	}
+	if !strings.Contains(output.String(), "reshuffle unavailable") {
+		t.Fatalf("output = %q, want reshuffle unavailable message", output.String())
+	}
+}
+
 func TestRunPrintsInitialSnapshot(t *testing.T) {
 	session, initialSnapshot, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize)
 	if err != nil {
@@ -130,6 +176,12 @@ func TestRunPrintsInitialSnapshot(t *testing.T) {
 	}
 	if !strings.Contains(got, "time left:") {
 		t.Fatalf("run output does not include time left: %q", got)
+	}
+	if !strings.Contains(got, "reshuffle used: false") {
+		t.Fatalf("run output does not include reshuffle state: %q", got)
+	}
+	if !strings.Contains(got, "reshuffle") {
+		t.Fatalf("run output does not include reshuffle prompt: %q", got)
 	}
 }
 
@@ -166,6 +218,19 @@ func rectangleSum(board game.Board, selection game.Selection) int {
 
 func stringsForTest(selection game.Selection) string {
 	return fmt.Sprintf("%d %d %d %d", selection.Start.Row, selection.Start.Col, selection.End.Row, selection.End.Col)
+}
+
+func countZeroCells(board game.Board) int {
+	count := 0
+	for row := range board {
+		for col := range board[row] {
+			if board[row][col] == 0 {
+				count++
+			}
+		}
+	}
+
+	return count
 }
 
 type discardWriter struct{}

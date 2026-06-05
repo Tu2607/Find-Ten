@@ -90,6 +90,29 @@ button {
   line-height: 1.2;
 }
 
+.stats .skill {
+  min-width: 140px;
+}
+
+#reshuffleButton {
+  width: 100%;
+  margin-top: 2px;
+  border: 1px solid #b8c3d1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #171a20;
+}
+
+#reshuffleButton:not(:disabled):hover {
+  background: #edf6ff;
+}
+
+#reshuffleButton:disabled {
+  cursor: not-allowed;
+  background: #eef1f5;
+  color: #7a8493;
+}
+
 .board-panel {
   overflow: auto;
 }

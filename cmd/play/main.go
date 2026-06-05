@@ -15,6 +15,8 @@ import (
 	"find-ten-game/internal/game"
 )
 
+const promptText = "move row1 col1 row2 col2, reshuffle, or q to quit: "
+
 func main() {
 	size := flag.Int("size", game.MinSupportedBoardSize, "board size: 9, 10, or 11")
 	flag.Parse()
@@ -42,7 +44,7 @@ func run(ctx context.Context, input io.Reader, output io.Writer, session *game.G
 		fmt.Fprintf(output, "game over: %s\n", formatGameOverReason(initialSnapshot.GameOverReason))
 		return
 	}
-	fmt.Fprint(output, "move row1 col1 row2 col2, or q to quit: ")
+	fmt.Fprint(output, promptText)
 
 	lines := scanLines(ctx, input)
 	snapshots := session.Snapshots()
@@ -61,7 +63,7 @@ func run(ctx context.Context, input io.Reader, output io.Writer, session *game.G
 				fmt.Fprintf(output, "game over: %s\n", formatGameOverReason(snapshot.GameOverReason))
 				return
 			}
-			fmt.Fprint(output, "move row1 col1 row2 col2, or q to quit: ")
+			fmt.Fprint(output, promptText)
 
 		case line, ok := <-lines:
 			if !ok {
@@ -102,11 +104,30 @@ func handleInputLine(ctx context.Context, output io.Writer, line string, session
 		fmt.Fprintln(output, "quit")
 		return false
 	}
+	if line == "reshuffle" {
+		if err := session.SubmitReshuffle(ctx); err != nil {
+			switch {
+			case errors.Is(err, game.ErrReshuffleAlreadyUsed):
+				fmt.Fprintf(output, "reshuffle unavailable: %v\n", err)
+				fmt.Fprint(output, promptText)
+				return true
+			case errors.Is(err, game.ErrGameOver):
+				fmt.Fprintln(output, "game is already over")
+				return false
+			case errors.Is(err, game.ErrSessionClosed), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+				return false
+			default:
+				return false
+			}
+		}
+
+		return true
+	}
 
 	selection, err := parseSelection(line)
 	if err != nil {
 		fmt.Fprintf(output, "invalid input: %v\n", err)
-		fmt.Fprint(output, "move row1 col1 row2 col2, or q to quit: ")
+		fmt.Fprint(output, promptText)
 		return true
 	}
 
@@ -114,7 +135,7 @@ func handleInputLine(ctx context.Context, output io.Writer, line string, session
 		switch {
 		case errors.Is(err, game.ErrInvalidMove), errors.Is(err, game.ErrOutOfBounds):
 			fmt.Fprintf(output, "invalid move: %v\n", err)
-			fmt.Fprint(output, "move row1 col1 row2 col2, or q to quit: ")
+			fmt.Fprint(output, promptText)
 			return true
 		case errors.Is(err, game.ErrGameOver):
 			fmt.Fprintln(output, "game is already over")
@@ -153,10 +174,11 @@ func parseSelection(line string) (game.Selection, error) {
 
 func printSnapshot(output io.Writer, snapshot game.GameSnapshot, expiresAt time.Time) {
 	printBoard(output, snapshot.Board)
-	fmt.Fprintf(output, "seq: %d | score: %d | valid moves: %d | time left: %s | game over: %t\n",
+	fmt.Fprintf(output, "seq: %d | score: %d | valid moves: %d | reshuffle used: %t | time left: %s | game over: %t\n",
 		snapshot.Sequence,
 		snapshot.Score,
 		snapshot.ValidMoveCount,
+		snapshot.ReshuffleUsed,
 		formatTimeLeft(time.Until(expiresAt)),
 		snapshot.GameOver,
 	)

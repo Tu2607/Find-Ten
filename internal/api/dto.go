@@ -41,6 +41,7 @@ type snapshotResponse struct {
 	GameOver       bool      `json:"gameOver"`
 	GameOverReason int       `json:"gameOverReason"`
 	ValidMoveCount int       `json:"validMoveCount"`
+	ReshuffleUsed  bool      `json:"reshuffleUsed"`
 	SnapshotTime   time.Time `json:"snapshotTime"`
 }
 
@@ -52,6 +53,7 @@ func newSnapshotResponse(snapshot game.GameSnapshot) snapshotResponse {
 		GameOver:       snapshot.GameOver,
 		GameOverReason: int(snapshot.GameOverReason),
 		ValidMoveCount: snapshot.ValidMoveCount,
+		ReshuffleUsed:  snapshot.ReshuffleUsed,
 		SnapshotTime:   snapshot.SnapshotTime,
 	}
 }
