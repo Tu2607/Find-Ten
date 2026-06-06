@@ -7,6 +7,11 @@
 - Use `docs/PLAN.md` as the current step-by-step implementation roadmap.
 - Implement the plan step by step. Do not skip ahead unless the user explicitly asks.
 - Before starting a new implementation step, confirm the step with the user when practical.
+- ALWAYS ASK THE DEVELOPERS FOR PERMISSIONS BEFORE MAKING ANY EDITS.
+- Do not rewrite unrelated files.
+- Do not introduce work outside the current plan step unless the user asks.
+- Always go for the simplest working solution first.
+- Stick closely to the agreed plan and architecture. If implementation reveals a possible improvement, shortcut, pitfall, or design deviation, raise it to the user before making the change.
 
 ## Development Workflow
 - Follow the goal document for product behavior and scope.
@@ -17,11 +22,6 @@
 - Run `go test ./...` after implementation steps.
 
 ## Safety
-- ALWAYS ASK THE DEVELOPERS FOR PERMISSIONS BEFORE MAKING ANY EDITS.
-- Do not rewrite unrelated files.
-- Do not introduce work outside the current plan step unless the user asks.
-- Always go for the simplest working solution first.
-- Stick closely to the agreed plan and architecture. If implementation reveals a possible improvement, shortcut, pitfall, or design deviation, raise it to the user before making the change.
 - If `AGENTS.md`, `docs/GOAL.md`, `docs/ARCHITECTURE.md`, and `docs/PLAN.md` conflict, stop and ask the user before proceeding.
 - Treat `docs/GOAL.md` as the source of truth for product intent, `docs/ARCHITECTURE.md` as the source of truth for design decisions, and `docs/PLAN.md` as the source of truth for implementation order.
 - ALWAYS ASK THE USER WHEN SOMETHING IS UNCLEAR OR NEED VERIFICATION.

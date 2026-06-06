@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:8080", "server listen address")
+	addr := flag.String("addr", ":8080", "server listen address")
 	flag.Parse()
 
 	server := api.NewServer()
