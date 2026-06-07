@@ -17,6 +17,7 @@ func NewServer() http.Handler {
 	return server
 }
 
+// Type Server implements http.Handler, so it can be passed directly to ListenAndServe.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }

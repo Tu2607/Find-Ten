@@ -105,4 +105,4 @@ go test ./...
 
 - `docs/GOAL.md`: product intent and gameplay scope
 - `docs/ARCHITECTURE.md`: architecture decisions
-- `docs/PLAN.md`: stepwise implementation roadmap
+- `docs/plans/`: stepwise implementation roadmap
