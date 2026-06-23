@@ -26,6 +26,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", handleHealth)
 	s.mux.HandleFunc("POST /games", s.handleCreateGame)
 	s.mux.HandleFunc("GET /games", handleMethodNotAllowed)
+	s.mux.HandleFunc("DELETE /games/{id}", s.handleDeleteGame)
 	s.mux.HandleFunc("GET /games/{id}/snapshots", s.handleGameSnapshots)
 	s.mux.HandleFunc("POST /games/{id}/moves", s.handleSubmitMove)
 	s.mux.HandleFunc("GET /games/{id}/moves", handleMethodNotAllowed)

@@ -29,10 +29,16 @@ document.getElementById("startForm").addEventListener("submit", async (event) =>
 reshuffleButtonEl.addEventListener("click", submitReshuffle);
 
 async function startGame(size) {
+  const previousGameId = state.gameId;
+
   closeStream();
   stopCountdown();
   setStatus("Starting game...");
   gameEl.textContent = "Starting";
+
+  if (previousGameId) {
+    await abandonGame(previousGameId);
+  }
 
   let response;
   try {
@@ -66,6 +72,16 @@ async function startGame(size) {
   openSnapshots(game.gameId);
   startCountdown();
   setStatus("Select two corners that sum to 10.");
+}
+
+async function abandonGame(gameId) {
+  try {
+    await fetch(`/games/${gameId}`, {
+      method: "DELETE"
+    });
+  } catch {
+    // Best effort only. Starting a new game should still be attempted.
+  }
 }
 
 function openSnapshots(gameId) {

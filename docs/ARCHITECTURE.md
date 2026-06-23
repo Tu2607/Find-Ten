@@ -205,8 +205,10 @@ The API currently exposes:
 
 - `GET /health`
 - `POST /games`
+- `DELETE /games/{id}`
 - `GET /games/{id}/snapshots`
 - `POST /games/{id}/moves`
+- `POST /games/{id}/reshuffle`
 
 ### Create Game
 
@@ -220,6 +222,8 @@ The request body supplies the board size. The handler validates the size through
 The initial snapshot is the bootstrap snapshot returned by `NewGameSession` and has sequence `1`.
 
 The create-game handler intentionally uses `context.Background()` for the game session lifecycle. It must not pass `r.Context()` into `NewGameSession`, because the request context is canceled when the create-game HTTP request finishes. A game session must continue running after the create response is returned.
+
+If the session store is full after opportunistic cleanup, `POST /games` returns `503 Service Unavailable` and stops the newly created session before returning.
 
 ### API Session Store
 
@@ -235,7 +239,21 @@ Each stored game contains:
 
 The store owns generated opaque game IDs but does not own game rules or game-state mutation. It is a registry and lookup boundary only.
 
-There is currently no persistence and no deletion policy. Created sessions remain in memory until process exit. A future cleanup step can remove completed sessions or add a broader game manager without changing the core game loop.
+The store is in-memory only. It has no external persistence and no background cleanup goroutine.
+
+Completed sessions are cleaned opportunistically when a new game is added. Cleanup removes stored sessions whose `GameSession.Done()` channel is already closed. Active sessions are not removed by opportunistic cleanup.
+
+New session creation is capped at `150` stored sessions after cleanup. If the store remains full, creation fails with `503 Service Unavailable`.
+
+### Abandon Game
+
+`DELETE /games/{id}` explicitly abandons a known session.
+
+If the ID exists, the API removes it from the session store, then stops the session outside the store mutex, and returns `204 No Content`.
+
+If the ID is unknown, the API returns `404 Not Found`. Removed game IDs return `404 Not Found` on later move, reshuffle, and snapshot requests.
+
+`POST /games` does not implicitly abandon existing sessions. The WebUI abandons its previous `state.gameId` best effort before creating a replacement game, which keeps browser tabs independent.
 
 ### Snapshot Stream
 

@@ -57,6 +57,12 @@ func TestServerRouteDispatch(t *testing.T) {
 			wantStatus: http.StatusNotFound,
 		},
 		{
+			name:       "delete unknown game",
+			method:     http.MethodDelete,
+			path:       "/games/test-game",
+			wantStatus: http.StatusNotFound,
+		},
+		{
 			name:       "unknown route",
 			method:     http.MethodGet,
 			path:       "/missing",
@@ -268,6 +274,129 @@ func TestCreateGameBadRequests(t *testing.T) {
 
 			if response.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func TestCreateGameReturnsServiceUnavailableWhenSessionStoreIsFull(t *testing.T) {
+	server := NewServer().(*Server)
+	server.store.maxSessions = 0
+
+	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(`{"size":9}`))
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestCreateGameReturnsServiceUnavailableAtProductionCapacity(t *testing.T) {
+	server := NewServer().(*Server)
+	createdGames := make([]createdGameForTest, 0, defaultMaxStoredSessions)
+
+	defer func() {
+		for _, created := range createdGames {
+			created.stored.session.Stop()
+		}
+	}()
+
+	for i := 0; i < defaultMaxStoredSessions; i++ {
+		createdGames = append(createdGames, createGameForTest(t, server, 9))
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(`{"size":9}`))
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestDeleteGameRemovesAndStopsSession(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+
+	request := httptest.NewRequest(http.MethodDelete, "/games/"+created.response.GameID, nil)
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNoContent)
+	}
+	if _, ok := server.store.get(created.response.GameID); ok {
+		t.Fatal("deleted game remained in store")
+	}
+
+	select {
+	case <-created.stored.session.Done():
+	case <-time.After(time.Second):
+		t.Fatal("deleted game session did not stop")
+	}
+}
+
+func TestDeleteGameUnknownReturnsNotFound(t *testing.T) {
+	server := NewServer().(*Server)
+
+	request := httptest.NewRequest(http.MethodDelete, "/games/missing", nil)
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestDeletedGameRequestsReturnNotFound(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/games/"+created.response.GameID, nil)
+	deleteResponse := httptest.NewRecorder()
+	server.ServeHTTP(deleteResponse, deleteRequest)
+	if deleteResponse.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want %d", deleteResponse.Code, http.StatusNoContent)
+	}
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   io.Reader
+	}{
+		{
+			name:   "move",
+			method: http.MethodPost,
+			path:   "/games/" + created.response.GameID + "/moves",
+			body:   strings.NewReader(moveJSONForTest(game.Selection{})),
+		},
+		{
+			name:   "reshuffle",
+			method: http.MethodPost,
+			path:   "/games/" + created.response.GameID + "/reshuffle",
+		},
+		{
+			name:   "snapshots",
+			method: http.MethodGet,
+			path:   "/games/" + created.response.GameID + "/snapshots",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, test.path, test.body)
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
 			}
 		})
 	}

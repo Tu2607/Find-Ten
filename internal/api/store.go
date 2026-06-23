@@ -3,16 +3,23 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"sync"
 
 	"find-ten-game/internal/game"
 )
 
-const gameIDByteCount = 16
+const (
+	gameIDByteCount          = 16
+	defaultMaxStoredSessions = 150
+)
+
+var errSessionStoreFull = errors.New("session store is full")
 
 type sessionStore struct {
-	mu       sync.Mutex
-	sessions map[string]storedGame
+	mu          sync.Mutex
+	sessions    map[string]storedGame
+	maxSessions int
 }
 
 type storedGame struct {
@@ -22,7 +29,8 @@ type storedGame struct {
 
 func newSessionStore() *sessionStore {
 	return &sessionStore{
-		sessions: make(map[string]storedGame),
+		sessions:    make(map[string]storedGame),
+		maxSessions: defaultMaxStoredSessions,
 	}
 }
 
@@ -38,6 +46,11 @@ func (s *sessionStore) add(session *game.GameSession) (string, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.pruneCompletedLocked()
+	if len(s.sessions) >= s.maxSessions {
+		return "", errSessionStoreFull
+	}
 
 	for {
 		id, err := newGameID()
@@ -59,6 +72,29 @@ func (s *sessionStore) get(id string) (storedGame, bool) {
 
 	stored, ok := s.sessions[id]
 	return stored, ok
+}
+
+func (s *sessionStore) remove(id string) (storedGame, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stored, ok := s.sessions[id]
+	if !ok {
+		return storedGame{}, false
+	}
+
+	delete(s.sessions, id)
+	return stored, true
+}
+
+func (s *sessionStore) pruneCompletedLocked() {
+	for id, stored := range s.sessions {
+		select {
+		case <-stored.session.Done():
+			delete(s.sessions, id)
+		default:
+		}
+	}
 }
 
 func newGameID() (string, error) {

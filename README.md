@@ -86,14 +86,20 @@ The server exposes:
 
 - `GET /health`
 - `POST /games`
+- `DELETE /games/{id}`
 - `GET /games/{id}/snapshots`
 - `POST /games/{id}/moves`
+- `POST /games/{id}/reshuffle`
 
 `POST /games` creates a game and returns the initial snapshot plus `expiresAt`.
+
+`DELETE /games/{id}` abandons a game session and removes its ID from the in-memory store.
 
 `GET /games/{id}/snapshots` opens an SSE stream for runtime snapshots after successful moves.
 
 `POST /games/{id}/moves` submits a rectangle selection. Move responses are acknowledgements only; updated board state arrives through SSE.
+
+`POST /games/{id}/reshuffle` uses the once-per-session reshuffle skill. Responses are acknowledgements only; updated board state arrives through SSE.
 
 ## Test
 

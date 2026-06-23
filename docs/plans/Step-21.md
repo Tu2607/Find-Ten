@@ -1,4 +1,4 @@
-## Step 21: Session Store Cleanup, Capacity Guard, and Abandon Endpoint - Planned
+## Step 21: Session Store Cleanup, Capacity Guard, and Abandon Endpoint - Done
 
 Keep the current in-memory session store, but add explicit and opportunistic cleanup so old sessions do not accumulate. The WebUI will abandon its current game before starting a new one, and the store will reject new sessions when capacity is full.
 
@@ -94,6 +94,7 @@ Store tests should cover:
 
 API tests should cover:
 - `POST /games` returns `503 Service Unavailable` when capacity is full.
+- `POST /games` returns `503 Service Unavailable` for the 151st active session when using the production default capacity.
 - `DELETE /games/{id}` returns `204` and stops/removes an existing session.
 - `DELETE /games/{id}` returns `404` for unknown IDs.
 - requests for a deleted game ID return `404`.
@@ -111,9 +112,9 @@ WebUI tests/manual verification should cover:
 - The WebUI abandons its previous game before starting a new one.
 - Completed sessions from non-cooperative clients are cleaned opportunistically on the next `POST /games`.
 - New session creation is capped at `150` stored sessions after cleanup.
+- The production `150` session cap is covered by an API test that creates 150 active sessions and verifies the next create request returns `503 Service Unavailable`.
 - Removed sessions have their generated game IDs pruned from the store map.
 - No external storage or persistence is added.
 - No background cleanup goroutine is added.
 - Run `gofmt` on changed Go files.
 - Run `go test ./...`.
-

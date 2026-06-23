@@ -50,6 +50,10 @@ func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request) {
 	gameID, err := s.store.add(session)
 	if err != nil {
 		session.Stop()
+		if errors.Is(err, errSessionStoreFull) {
+			writeError(w, http.StatusServiceUnavailable, "session store is full")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to store game")
 		return
 	}
@@ -63,6 +67,19 @@ func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	stored, ok := s.store.remove(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "game not found")
+		return
+	}
+
+	stored.session.Stop()
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleSubmitMove(w http.ResponseWriter, r *http.Request) {
