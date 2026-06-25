@@ -138,6 +138,36 @@ func (s *Server) handleSubmitReshuffle(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(submitMoveResponse{Accepted: true})
 }
 
+func (s *Server) handleSubmitRemoveNumber(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	stored, ok := s.store.get(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "game not found")
+		return
+	}
+
+	var request submitRemoveNumberRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	position, ok := request.toPosition()
+	if !ok {
+		writeError(w, http.StatusBadRequest, "position is required")
+		return
+	}
+
+	if err := stored.session.SubmitRemoveNumber(r.Context(), position); err != nil {
+		writeMoveError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(submitMoveResponse{Accepted: true})
+}
+
 func (s *Server) handleGameSnapshots(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	stored, ok := s.store.get(id)
@@ -197,11 +227,11 @@ func writeSnapshotEvent(w io.Writer, snapshot snapshotResponse) error {
 
 func writeMoveError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, game.ErrInvalidMove), errors.Is(err, game.ErrOutOfBounds):
+	case errors.Is(err, game.ErrInvalidMove), errors.Is(err, game.ErrOutOfBounds), errors.Is(err, game.ErrRemoveNumberInvalidTarget):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, game.ErrGameOver):
 		writeError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, game.ErrReshuffleAlreadyUsed):
+	case errors.Is(err, game.ErrReshuffleAlreadyUsed), errors.Is(err, game.ErrRemoveNumberAlreadyUsed):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, game.ErrSessionClosed):
 		writeError(w, http.StatusGone, err.Error())

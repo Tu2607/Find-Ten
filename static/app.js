@@ -7,6 +7,9 @@ const state = {
   gameOverPopupShown: false,
   reshuffleUsed: false,
   reshufflePending: false,
+  removeNumberUsed: false,
+  removeNumberPending: false,
+  removeMode: false,
   selectedStart: null,
   hoverCell: null,
   expiresAt: null,
@@ -20,6 +23,7 @@ const timeEl = document.getElementById("timeValue");
 const gameEl = document.getElementById("gameValue");
 const statusEl = document.getElementById("statusText");
 const reshuffleButtonEl = document.getElementById("reshuffleButton");
+const removeNumberButtonEl = document.getElementById("removeNumberButton");
 
 document.getElementById("startForm").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -27,6 +31,7 @@ document.getElementById("startForm").addEventListener("submit", async (event) =>
 });
 
 reshuffleButtonEl.addEventListener("click", submitReshuffle);
+removeNumberButtonEl.addEventListener("click", enableRemoveMode);
 
 async function startGame(size) {
   const previousGameId = state.gameId;
@@ -67,6 +72,9 @@ async function startGame(size) {
   state.gameOverPopupShown = false;
   state.reshuffleUsed = false;
   state.reshufflePending = false;
+  state.removeNumberUsed = false;
+  state.removeNumberPending = false;
+  state.removeMode = false;
 
   applySnapshot(game.initialSnapshot);
   openSnapshots(game.gameId);
@@ -103,7 +111,10 @@ function applySnapshot(snapshot) {
   state.gameOver = snapshot.gameOver;
   state.gameOverReason = snapshot.gameOverReason;
   state.reshuffleUsed = Boolean(snapshot.reshuffleUsed);
+  state.removeNumberUsed = Boolean(snapshot.removeNumberUsed);
   state.reshufflePending = false;
+  state.removeNumberPending = false;
+  state.removeMode = false;
   state.selectedStart = null;
   state.hoverCell = null;
 
@@ -115,7 +126,7 @@ function applySnapshot(snapshot) {
 
   scoreEl.textContent = state.score;
   gameEl.textContent = state.gameOver ? gameOverText(state.gameOverReason) : "Playing";
-  updateReshuffleButton();
+  updateSkillButtons();
   maybeShowGameOver(snapshot);
   renderBoard();
 }
@@ -170,10 +181,11 @@ async function submitReshuffle() {
   }
 
   state.reshufflePending = true;
+  state.removeMode = false;
   state.selectedStart = null;
   state.hoverCell = null;
   updateSelectionPreview();
-  updateReshuffleButton();
+  updateSkillButtons();
   setStatus("Reshuffling board...");
 
   let response;
@@ -183,7 +195,7 @@ async function submitReshuffle() {
     });
   } catch {
     state.reshufflePending = false;
-    updateReshuffleButton();
+    updateSkillButtons();
     setStatus("Could not reshuffle.");
     return;
   }
@@ -201,17 +213,41 @@ async function submitReshuffle() {
       gameEl.textContent = "Ended";
       renderBoard();
     }
-    updateReshuffleButton();
+    updateSkillButtons();
     setStatus(response.status === 409 ? "Reshuffle unavailable." : "Game ended.");
     return;
   }
 
-  updateReshuffleButton();
+  updateSkillButtons();
   setStatus("Reshuffle failed.");
+}
+
+function enableRemoveMode() {
+  if (!state.gameId || state.gameOver || state.removeNumberUsed || state.removeNumberPending) {
+    return;
+  }
+  if (state.removeMode) {
+    state.removeMode = false;
+    updateSkillButtons();
+    setStatus("Remove canceled.");
+    return;
+  }
+
+  state.removeMode = true;
+  state.selectedStart = null;
+  state.hoverCell = null;
+  updateSelectionPreview();
+  updateSkillButtons();
+  setStatus("Choose a number to remove.");
 }
 
 async function handleCellClick(row, col) {
   if (!state.gameId || state.gameOver) {
+    return;
+  }
+
+  if (state.removeMode) {
+    await submitRemoveNumber({ row, col });
     return;
   }
 
@@ -230,8 +266,63 @@ async function handleCellClick(row, col) {
   await submitMove(selection);
 }
 
+async function submitRemoveNumber(position) {
+  if (state.removeNumberPending || state.removeNumberUsed) {
+    return;
+  }
+  if (state.board[position.row][position.col] === 0) {
+    setStatus("Choose a number that has not been cleared.");
+    return;
+  }
+
+  state.removeNumberPending = true;
+  state.selectedStart = null;
+  state.hoverCell = null;
+  updateSelectionPreview();
+  updateSkillButtons();
+  setStatus("Removing number...");
+
+  let response;
+  try {
+    response = await fetch(`/games/${state.gameId}/remove-number`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ position })
+    });
+  } catch {
+    state.removeNumberPending = false;
+    state.removeMode = false;
+    updateSkillButtons();
+    setStatus("Could not remove number.");
+    return;
+  }
+
+  if (response.ok) {
+    setStatus("Remove accepted.");
+    return;
+  }
+
+  state.removeNumberPending = false;
+  if (response.status === 409 || response.status === 410) {
+    state.removeNumberUsed = true;
+    state.removeMode = false;
+    if (response.status === 410) {
+      state.gameOver = true;
+      gameEl.textContent = "Ended";
+      renderBoard();
+    }
+    updateSkillButtons();
+    setStatus(response.status === 409 ? "Remove unavailable." : "Game ended.");
+    return;
+  }
+
+  state.removeMode = false;
+  updateSkillButtons();
+  setStatus(response.status === 400 ? "Cannot remove that cell." : "Remove failed.");
+}
+
 function handleCellHover(row, col) {
-  if (!state.selectedStart || state.gameOver) {
+  if (!state.selectedStart || state.removeMode || state.gameOver) {
     return;
   }
 
@@ -266,6 +357,7 @@ async function submitMove(selection) {
     state.gameOver = true;
     gameEl.textContent = "Ended";
     setStatus("Game ended.");
+    updateSkillButtons();
     renderBoard();
     return;
   }
@@ -320,10 +412,13 @@ function renderCountdown() {
 
   if (remaining === 0 && !state.gameOver) {
     state.gameOver = true;
+    state.gameOverReason = 2;
+    state.gameOverPopupShown = true;
     gameEl.textContent = "Expired";
     setStatus("Time expired.");
-    updateReshuffleButton();
+    updateSkillButtons();
     renderBoard();
+    alert("Game over: Expired");
   }
 }
 
@@ -345,6 +440,11 @@ function setStatus(message) {
   statusEl.textContent = message;
 }
 
+function updateSkillButtons() {
+  updateReshuffleButton();
+  updateRemoveNumberButton();
+}
+
 function updateReshuffleButton() {
   const disabled = !state.gameId || state.gameOver || state.reshuffleUsed || state.reshufflePending;
   reshuffleButtonEl.disabled = disabled;
@@ -359,6 +459,26 @@ function updateReshuffleButton() {
   }
 
   reshuffleButtonEl.textContent = "Reshuffle";
+}
+
+function updateRemoveNumberButton() {
+  const disabled = !state.gameId || state.gameOver || state.removeNumberUsed || state.removeNumberPending;
+  removeNumberButtonEl.disabled = disabled;
+
+  if (state.removeNumberPending) {
+    removeNumberButtonEl.textContent = "Removing";
+    return;
+  }
+  if (state.removeNumberUsed) {
+    removeNumberButtonEl.textContent = "Used";
+    return;
+  }
+  if (state.removeMode) {
+    removeNumberButtonEl.textContent = "Cancel";
+    return;
+  }
+
+  removeNumberButtonEl.textContent = "Remove";
 }
 
 function gameOverText(reason) {

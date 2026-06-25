@@ -57,6 +57,12 @@ func TestServerRouteDispatch(t *testing.T) {
 			wantStatus: http.StatusNotFound,
 		},
 		{
+			name:       "remove number unknown game",
+			method:     http.MethodPost,
+			path:       "/games/test-game/remove-number",
+			wantStatus: http.StatusNotFound,
+		},
+		{
 			name:       "delete unknown game",
 			method:     http.MethodDelete,
 			path:       "/games/test-game",
@@ -96,6 +102,12 @@ func TestServerRouteDispatch(t *testing.T) {
 			name:       "unsupported reshuffle method",
 			method:     http.MethodGet,
 			path:       "/games/test-game/reshuffle",
+			wantStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:       "unsupported remove number method",
+			method:     http.MethodGet,
+			path:       "/games/test-game/remove-number",
 			wantStatus: http.StatusMethodNotAllowed,
 		},
 	}
@@ -185,6 +197,9 @@ func TestCreateGame(t *testing.T) {
 	}
 	if body.InitialSnapshot.ReshuffleUsed {
 		t.Fatal("InitialSnapshot.ReshuffleUsed = true, want false")
+	}
+	if body.InitialSnapshot.RemoveNumberUsed {
+		t.Fatal("InitialSnapshot.RemoveNumberUsed = true, want false")
 	}
 	if body.ExpiresAt.IsZero() {
 		t.Fatal("ExpiresAt is zero, want session deadline")
@@ -382,6 +397,12 @@ func TestDeletedGameRequestsReturnNotFound(t *testing.T) {
 			path:   "/games/" + created.response.GameID + "/reshuffle",
 		},
 		{
+			name:   "remove number",
+			method: http.MethodPost,
+			path:   "/games/" + created.response.GameID + "/remove-number",
+			body:   strings.NewReader(removeNumberJSONForTest(game.Position{})),
+		},
+		{
 			name:   "snapshots",
 			method: http.MethodGet,
 			path:   "/games/" + created.response.GameID + "/snapshots",
@@ -566,6 +587,211 @@ func TestSubmitReshuffleStoppedSessionReturnsGone(t *testing.T) {
 	created.stored.session.Stop()
 
 	response := postReshuffleForTest(t, server, created.response.GameID)
+
+	if response.Code != http.StatusGone {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusGone)
+	}
+}
+
+func TestSubmitRemoveNumber(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	position, ok := firstNonZeroPosition(created.response.InitialSnapshot.Board)
+	if !ok {
+		t.Fatal("firstNonZeroPosition returned false, want removable number")
+	}
+
+	response := postRemoveNumberForTest(t, server, created.response.GameID, position)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode remove-number response: %v", err)
+	}
+	if accepted, ok := body["accepted"].(bool); !ok || !accepted {
+		t.Fatalf("accepted = %v, want true", body["accepted"])
+	}
+	if _, ok := body["snapshot"]; ok {
+		t.Fatal("remove-number response included snapshot, want acknowledgement only")
+	}
+	if _, ok := body["initialSnapshot"]; ok {
+		t.Fatal("remove-number response included initialSnapshot, want acknowledgement only")
+	}
+}
+
+func TestSubmitRemoveNumberPublishesSnapshotToSSE(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	testServer := httptest.NewServer(server)
+	defer testServer.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	snapshotRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, testServer.URL+"/games/"+created.response.GameID+"/snapshots", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext returned error: %v", err)
+	}
+
+	snapshotResponse, err := testServer.Client().Do(snapshotRequest)
+	if err != nil {
+		t.Fatalf("GET snapshots returned error: %v", err)
+	}
+	defer snapshotResponse.Body.Close()
+
+	position, ok := firstNonZeroPosition(created.response.InitialSnapshot.Board)
+	if !ok {
+		t.Fatal("firstNonZeroPosition returned false, want removable number")
+	}
+
+	removeResponse := postRemoveNumberHTTPForTest(t, testServer.Client(), testServer.URL, created.response.GameID, position)
+	defer removeResponse.Body.Close()
+	if removeResponse.StatusCode != http.StatusOK {
+		t.Fatalf("remove-number status = %d, want %d", removeResponse.StatusCode, http.StatusOK)
+	}
+
+	event := readSnapshotEvent(t, snapshotResponse.Body)
+	if event.Sequence != 2 {
+		t.Fatalf("event.Sequence = %d, want 2", event.Sequence)
+	}
+	if !event.RemoveNumberUsed {
+		t.Fatal("event.RemoveNumberUsed = false, want true")
+	}
+	if event.Score != created.response.InitialSnapshot.Score {
+		t.Fatalf("event.Score = %d, want %d", event.Score, created.response.InitialSnapshot.Score)
+	}
+	if event.Board[position.Row][position.Col] != 0 {
+		t.Fatalf("event.Board[%d][%d] = %d, want 0", position.Row, position.Col, event.Board[position.Row][position.Col])
+	}
+}
+
+func TestSubmitRemoveNumberUnknownGameReturnsNotFound(t *testing.T) {
+	server := NewServer().(*Server)
+	response := postRemoveNumberForTest(t, server, "missing", game.Position{})
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestSubmitRemoveNumberBadRequests(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "invalid JSON",
+			body: `{"position":`,
+		},
+		{
+			name: "missing position",
+			body: `{}`,
+		},
+		{
+			name: "missing row",
+			body: `{"position":{"col":0}}`,
+		},
+		{
+			name: "missing col",
+			body: `{"position":{"row":0}}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := NewServer().(*Server)
+			created := createGameForTest(t, server, 9)
+			defer created.stored.session.Stop()
+
+			request := httptest.NewRequest(http.MethodPost, "/games/"+created.response.GameID+"/remove-number", strings.NewReader(test.body))
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func TestSubmitRemoveNumberOutOfBoundsReturnsBadRequest(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	response := postRemoveNumberForTest(t, server, created.response.GameID, game.Position{Row: 99, Col: 99})
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+func TestSubmitRemoveNumberInvalidTargetDoesNotConsumeSkill(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	move, ok := firstValidSelection(created.response.InitialSnapshot.Board)
+	if !ok {
+		t.Fatal("firstValidSelection returned false, want valid move")
+	}
+	moveResponse := postMoveForTest(t, server, created.response.GameID, move)
+	if moveResponse.Code != http.StatusOK {
+		t.Fatalf("move status = %d, want %d", moveResponse.Code, http.StatusOK)
+	}
+
+	response := postRemoveNumberForTest(t, server, created.response.GameID, move.Start)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("cleared-target status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+
+	position, ok := firstNonZeroPositionOutsideSelection(created.response.InitialSnapshot.Board, move)
+	if !ok {
+		t.Fatal("firstNonZeroPositionOutsideSelection returned false, want removable number")
+	}
+	response = postRemoveNumberForTest(t, server, created.response.GameID, position)
+	if response.Code != http.StatusOK {
+		t.Fatalf("valid remove after invalid target status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
+
+func TestSubmitRemoveNumberAlreadyUsedReturnsConflict(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	position, ok := firstNonZeroPosition(created.response.InitialSnapshot.Board)
+	if !ok {
+		t.Fatal("firstNonZeroPosition returned false, want removable number")
+	}
+	response := postRemoveNumberForTest(t, server, created.response.GameID, position)
+	if response.Code != http.StatusOK {
+		t.Fatalf("first remove-number status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	nextPosition, ok := firstNonZeroPositionExcluding(created.response.InitialSnapshot.Board, position)
+	if !ok {
+		t.Fatal("firstNonZeroPositionExcluding returned false, want another removable number")
+	}
+	response = postRemoveNumberForTest(t, server, created.response.GameID, nextPosition)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("second remove-number status = %d, want %d", response.Code, http.StatusConflict)
+	}
+}
+
+func TestSubmitRemoveNumberStoppedSessionReturnsGone(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	created.stored.session.Stop()
+
+	response := postRemoveNumberForTest(t, server, created.response.GameID, game.Position{})
 
 	if response.Code != http.StatusGone {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusGone)
@@ -885,6 +1111,53 @@ func firstValidSelection(board [][]int) (game.Selection, bool) {
 	return validMoves[0], true
 }
 
+func firstNonZeroPosition(board [][]int) (game.Position, bool) {
+	for row := range board {
+		for col := range board[row] {
+			if board[row][col] != 0 {
+				return game.Position{Row: row, Col: col}, true
+			}
+		}
+	}
+
+	return game.Position{}, false
+}
+
+func firstNonZeroPositionExcluding(board [][]int, excluded game.Position) (game.Position, bool) {
+	for row := range board {
+		for col := range board[row] {
+			position := game.Position{Row: row, Col: col}
+			if position != excluded && board[row][col] != 0 {
+				return position, true
+			}
+		}
+	}
+
+	return game.Position{}, false
+}
+
+func firstNonZeroPositionOutsideSelection(board [][]int, selection game.Selection) (game.Position, bool) {
+	selection = game.NormalizeSelection(selection)
+	for row := range board {
+		for col := range board[row] {
+			position := game.Position{Row: row, Col: col}
+			if positionInsideSelection(position, selection) || board[row][col] == 0 {
+				continue
+			}
+			return position, true
+		}
+	}
+
+	return game.Position{}, false
+}
+
+func positionInsideSelection(position game.Position, selection game.Selection) bool {
+	return position.Row >= selection.Start.Row &&
+		position.Row <= selection.End.Row &&
+		position.Col >= selection.Start.Col &&
+		position.Col <= selection.End.Col
+}
+
 func buildValidMovesForTest(board [][]int) ([]game.Selection, error) {
 	var validMoves []game.Selection
 	for startRow := range board {
@@ -961,6 +1234,28 @@ func postReshuffleHTTPForTest(t *testing.T, client *http.Client, serverURL strin
 	return response
 }
 
+func postRemoveNumberForTest(t *testing.T, server http.Handler, gameID string, position game.Position) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodPost, "/games/"+gameID+"/remove-number", strings.NewReader(removeNumberJSONForTest(position)))
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	return response
+}
+
+func postRemoveNumberHTTPForTest(t *testing.T, client *http.Client, serverURL string, gameID string, position game.Position) *http.Response {
+	t.Helper()
+
+	response, err := client.Post(serverURL+"/games/"+gameID+"/remove-number", "application/json", strings.NewReader(removeNumberJSONForTest(position)))
+	if err != nil {
+		t.Fatalf("POST remove-number returned error: %v", err)
+	}
+
+	return response
+}
+
 func moveJSONForTest(selection game.Selection) string {
 	return `{"selection":{"start":{"row":` +
 		strconv.Itoa(selection.Start.Row) +
@@ -971,6 +1266,14 @@ func moveJSONForTest(selection game.Selection) string {
 		`,"col":` +
 		strconv.Itoa(selection.End.Col) +
 		`}}}`
+}
+
+func removeNumberJSONForTest(position game.Position) string {
+	return `{"position":{"row":` +
+		strconv.Itoa(position.Row) +
+		`,"col":` +
+		strconv.Itoa(position.Col) +
+		`}}`
 }
 
 func countZeroCellsForTest(board [][]int) int {

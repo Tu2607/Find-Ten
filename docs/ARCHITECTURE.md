@@ -92,9 +92,10 @@ Player actions are user-triggered commands that may mutate authoritative game st
 
 The runtime uses a single player action request channel for these commands. This keeps all player-triggered state mutations serialized through `RunGame` without reintroducing timer countdown traffic into the same channel.
 
-The initial player action types are:
+The current player action types are:
 - rectangle move
 - reshuffle skill
+- remove-number skill
 
 The request shape should include an enum-like action type, the data needed by that action, and an error-only result channel. For example:
 
@@ -104,16 +105,18 @@ type PlayerActionType int
 const (
 	PlayerActionMove PlayerActionType = iota + 1
 	PlayerActionReshuffle
+	PlayerActionRemoveNumber
 )
 
 type PlayerActionRequest struct {
 	Type      PlayerActionType
 	Selection Selection
+	Position  Position
 	Result    chan error
 }
 ```
 
-`Selection` is meaningful only for rectangle move actions. Reshuffle actions do not require selection data.
+`Selection` is meaningful only for rectangle move actions. `Position` is meaningful only for remove-number actions. Reshuffle actions do not require selection or position data.
 
 `RunGame` is the only consumer of the player action channel. It switches on the action type, applies the requested mutation before the session deadline, sends the result through the action result channel, and publishes a snapshot only when the action succeeds.
 
@@ -209,6 +212,7 @@ The API currently exposes:
 - `GET /games/{id}/snapshots`
 - `POST /games/{id}/moves`
 - `POST /games/{id}/reshuffle`
+- `POST /games/{id}/remove-number`
 
 ### Create Game
 
@@ -251,7 +255,7 @@ New session creation is capped at `150` stored sessions after cleanup. If the st
 
 If the ID exists, the API removes it from the session store, then stops the session outside the store mutex, and returns `204 No Content`.
 
-If the ID is unknown, the API returns `404 Not Found`. Removed game IDs return `404 Not Found` on later move, reshuffle, and snapshot requests.
+If the ID is unknown, the API returns `404 Not Found`. Removed game IDs return `404 Not Found` on later move, reshuffle, remove-number, and snapshot requests.
 
 `POST /games` does not implicitly abandon existing sessions. The WebUI abandons its previous `state.gameId` best effort before creating a replacement game, which keeps browser tabs independent.
 
@@ -283,7 +287,7 @@ stored.session.SubmitMove(r.Context(), selection)
 
 The move endpoint intentionally uses the HTTP request context because move submission is request-scoped. If the client disconnects or the request is canceled while waiting for the game loop, the handler stops waiting. This does not cancel the game session itself.
 
-The API does not expose or decode `game.PlayerActionRequest` as an HTTP DTO. `PlayerActionRequest` contains runtime plumbing, including the per-action result channel. `GameSession.SubmitMove` owns creation of the move action request.
+The API does not expose or decode `game.PlayerActionRequest` as an HTTP DTO. `PlayerActionRequest` contains runtime plumbing, including the per-action result channel. `GameSession` submit methods own creation of player action requests.
 
 Successful move responses are acknowledgements only:
 
@@ -295,9 +299,29 @@ Move responses do not include snapshots. Updated board state is delivered throug
 
 Invalid moves and out-of-bounds selections return `400 Bad Request` and do not end the game. This matches the CLI flow and core game rules. Game-over move submissions return `409 Conflict`; closed sessions return `410 Gone`.
 
-## CLI First
+### Remove-Number Submission
 
-The CLI demo is the first manual testing surface.
+`POST /games/{id}/remove-number` submits one cell position for the once-per-session remove-number skill.
+
+The request body contains a JSON position with row and column coordinates. The handler decodes that request into API DTOs, converts the DTO to `game.Position`, and calls:
+
+```go
+stored.session.SubmitRemoveNumber(r.Context(), position)
+```
+
+Successful remove-number responses are acknowledgements only:
+
+```json
+{ "accepted": true }
+```
+
+The response does not include a snapshot. Updated board state is delivered through the SSE snapshot stream.
+
+The skill sets one selected non-zero cell to `0`, does not award score, rebuilds valid moves, and can be used only once per session. Rejected attempts do not consume the remaining skill use. Out-of-bounds positions and already-cleared target cells return `400 Bad Request`; already-used and game-over submissions return `409 Conflict`; closed sessions return `410 Gone`.
+
+## CLI
+
+The CLI demo was the first manual testing surface and remains a thin client over `internal/game`.
 
 The CLI is not a separate rules implementation. It is a thin client over `internal/game` and follows the same actor-style ownership model planned for a future web backend.
 
@@ -306,7 +330,9 @@ The CLI wiring has three channels:
 - the player action request channel consumed by `RunGame`
 - the snapshot channel produced by `RunGame`
 
-The CLI does not call game mutation functions directly after the game loop starts. It parses input into a player action, submits that action through `GameSession`, waits for the per-action result channel, and renders state from snapshots.
+The CLI does not call game mutation functions directly after the game loop starts. It parses supported input into a player action, submits that action through `GameSession`, waits for the per-action result channel, and renders state from snapshots.
+
+Now that the static WebUI is functional, new gameplay controls should target the WebUI first. The CLI should continue to compile and preserve existing move and reshuffle behavior, but it does not need to grow every new skill command.
 
 Action result waits are context-aware. If the game context is canceled before a result is sent, the CLI stops waiting instead of blocking forever. Per-action result channels are one-shot response channels: they may receive at most one result and are not closed.
 

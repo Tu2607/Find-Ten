@@ -5,14 +5,16 @@ import "errors"
 const pointsPerClearedCell = 100
 
 var (
-	ErrGameOver             = errors.New("game is over")
-	ErrInvalidMove          = errors.New("invalid move")
-	ErrOutOfBounds          = errors.New("selection is out of bounds")
-	ErrNilGameState         = errors.New("game state is nil")
-	ErrUninitializedMove    = errors.New("valid move cache is uninitialized")
-	ErrReshuffleAlreadyUsed = errors.New("reshuffle already used")
-	ErrReshuffleFailed      = errors.New("failed to generate reshuffled board")
-	ErrUnknownPlayerAction  = errors.New("unknown player action")
+	ErrGameOver                  = errors.New("game is over")
+	ErrInvalidMove               = errors.New("invalid move")
+	ErrOutOfBounds               = errors.New("selection is out of bounds")
+	ErrNilGameState              = errors.New("game state is nil")
+	ErrUninitializedMove         = errors.New("valid move cache is uninitialized")
+	ErrReshuffleAlreadyUsed      = errors.New("reshuffle already used")
+	ErrReshuffleFailed           = errors.New("failed to generate reshuffled board")
+	ErrRemoveNumberAlreadyUsed   = errors.New("remove number already used")
+	ErrRemoveNumberInvalidTarget = errors.New("remove number target is already cleared")
+	ErrUnknownPlayerAction       = errors.New("unknown player action")
 )
 
 func ApplyMove(state *GameState, selection Selection) error {
@@ -27,7 +29,7 @@ func ApplyMove(state *GameState, selection Selection) error {
 	}
 
 	selection = NormalizeSelection(selection)
-	if !boundCheck(selection, state.Board) {
+	if !selectionBoundCheck(selection, state.Board) {
 		return ErrOutOfBounds
 	}
 	if _, ok := state.validMoveSet[selection]; !ok {

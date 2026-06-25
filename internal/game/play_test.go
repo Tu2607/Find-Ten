@@ -181,23 +181,68 @@ func TestRunGameEmitsReshuffleSnapshot(t *testing.T) {
 	}
 }
 
-func TestRunGameSequencesMoveAndReshuffleSnapshots(t *testing.T) {
+func TestRunGameEmitsRemoveNumberSnapshot(t *testing.T) {
 	state := &GameState{
-		Board: testReshuffleBoard(),
+		Board: Board{
+			{4, 6},
+			{1, 9},
+		},
+		Score: 500,
 	}
 	rebuildValidMoveCache(state)
 
-	move, ok := firstValidSelection(state.Board)
-	if !ok {
-		t.Fatal("firstValidSelection returned false, want a valid move")
-	}
-
-	actions := make(chan PlayerActionRequest, 2)
+	actions := make(chan PlayerActionRequest, 1)
 	expired := make(chan struct{})
-	snapshots := make(chan GameSnapshot, 2)
+	snapshots := make(chan GameSnapshot, 1)
 	actions <- PlayerActionRequest{
-		Type:      PlayerActionMove,
-		Selection: move,
+		Type:     PlayerActionRemoveNumber,
+		Position: Position{Row: 0, Col: 0},
+	}
+	close(actions)
+
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+
+	snapshot := <-snapshots
+	if snapshot.Sequence != 2 {
+		t.Fatalf("snapshot.Sequence = %d, want 2", snapshot.Sequence)
+	}
+	if snapshot.Score != 500 {
+		t.Fatalf("snapshot.Score = %d, want 500", snapshot.Score)
+	}
+	if !snapshot.RemoveNumberUsed {
+		t.Fatal("snapshot.RemoveNumberUsed = false, want true")
+	}
+	if !state.RemoveNumberUsed {
+		t.Fatal("state.RemoveNumberUsed = false, want true")
+	}
+	if snapshot.Board[0][0] != 0 {
+		t.Fatalf("snapshot.Board[0][0] = %d, want 0", snapshot.Board[0][0])
+	}
+}
+
+func TestRunGameSequencesMoveReshuffleAndRemoveNumberSnapshots(t *testing.T) {
+	state := &GameState{
+		Board: Board{
+			{4, 6, 9},
+			{1, 9, 9},
+			{5, 5, 9},
+		},
+	}
+	rebuildValidMoveCache(state)
+
+	actions := make(chan PlayerActionRequest, 3)
+	expired := make(chan struct{})
+	snapshots := make(chan GameSnapshot, 3)
+	actions <- PlayerActionRequest{
+		Type:     PlayerActionRemoveNumber,
+		Position: Position{Row: 1, Col: 0},
+	}
+	actions <- PlayerActionRequest{
+		Type: PlayerActionMove,
+		Selection: Selection{
+			Start: Position{Row: 0, Col: 0},
+			End:   Position{Row: 0, Col: 1},
+		},
 	}
 	actions <- PlayerActionRequest{Type: PlayerActionReshuffle}
 	close(actions)
@@ -206,14 +251,21 @@ func TestRunGameSequencesMoveAndReshuffleSnapshots(t *testing.T) {
 
 	first := <-snapshots
 	second := <-snapshots
+	third := <-snapshots
 	if first.Sequence != 2 {
 		t.Fatalf("first.Sequence = %d, want 2", first.Sequence)
 	}
 	if second.Sequence != 3 {
 		t.Fatalf("second.Sequence = %d, want 3", second.Sequence)
 	}
-	if !second.ReshuffleUsed {
-		t.Fatal("second.ReshuffleUsed = false, want true")
+	if third.Sequence != 4 {
+		t.Fatalf("third.Sequence = %d, want 4", third.Sequence)
+	}
+	if !first.RemoveNumberUsed {
+		t.Fatal("first.RemoveNumberUsed = false, want true")
+	}
+	if !third.ReshuffleUsed {
+		t.Fatal("third.ReshuffleUsed = false, want true")
 	}
 }
 
@@ -372,6 +424,40 @@ func TestRunGameRejectedReshuffleDoesNotEmitSnapshot(t *testing.T) {
 	}
 }
 
+func TestRunGameRejectedRemoveNumberDoesNotEmitSnapshotOrConsumeSkill(t *testing.T) {
+	state := &GameState{
+		Board: Board{
+			{0, 6},
+			{1, 9},
+		},
+	}
+	rebuildValidMoveCache(state)
+
+	actions := make(chan PlayerActionRequest, 1)
+	expired := make(chan struct{})
+	snapshots := make(chan GameSnapshot, 1)
+	results := make(chan error, 1)
+	actions <- PlayerActionRequest{
+		Type:     PlayerActionRemoveNumber,
+		Position: Position{Row: 0, Col: 0},
+		Result:   results,
+	}
+	close(actions)
+
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+
+	if err := <-results; err != ErrRemoveNumberInvalidTarget {
+		t.Fatalf("remove-number result error = %v, want %v", err, ErrRemoveNumberInvalidTarget)
+	}
+	if state.RemoveNumberUsed {
+		t.Fatal("state.RemoveNumberUsed = true, want false")
+	}
+	_, ok := <-snapshots
+	if ok {
+		t.Fatal("received snapshot after rejected remove-number, want none")
+	}
+}
+
 func TestRunGameUnknownActionDoesNotEmitSnapshot(t *testing.T) {
 	state := &GameState{
 		Board: testReshuffleBoard(),
@@ -464,6 +550,38 @@ func TestRunGameRejectsReshuffleProcessedAfterExpiry(t *testing.T) {
 	}
 }
 
+func TestRunGameRejectsRemoveNumberProcessedAfterExpiry(t *testing.T) {
+	state := &GameState{
+		Board: Board{
+			{4, 6},
+		},
+	}
+	rebuildValidMoveCache(state)
+
+	actions := make(chan PlayerActionRequest, 1)
+	expired := make(chan struct{})
+	snapshots := make(chan GameSnapshot, 1)
+	results := make(chan error, 1)
+	actions <- PlayerActionRequest{
+		Type:     PlayerActionRemoveNumber,
+		Position: Position{Row: 0, Col: 0},
+		Result:   results,
+	}
+
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(-time.Second))
+
+	if err := <-results; err != ErrGameOver {
+		t.Fatalf("remove-number result error = %v, want %v", err, ErrGameOver)
+	}
+	if state.GameOverReason != GameOverTimeExpired {
+		t.Fatalf("state.GameOverReason = %v, want %v", state.GameOverReason, GameOverTimeExpired)
+	}
+	_, ok := <-snapshots
+	if ok {
+		t.Fatal("received snapshot for expired remove-number, want none")
+	}
+}
+
 func TestNewGameSessionReturnsInitialSnapshot(t *testing.T) {
 	session, snapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize)
 	if err != nil {
@@ -482,6 +600,9 @@ func TestNewGameSessionReturnsInitialSnapshot(t *testing.T) {
 	}
 	if snapshot.ReshuffleUsed {
 		t.Fatal("snapshot.ReshuffleUsed = true, want false")
+	}
+	if snapshot.RemoveNumberUsed {
+		t.Fatal("snapshot.RemoveNumberUsed = true, want false")
 	}
 }
 
@@ -579,6 +700,34 @@ func TestGameSessionSubmitReshuffle(t *testing.T) {
 	}
 }
 
+func TestGameSessionSubmitRemoveNumber(t *testing.T) {
+	session, initialSnapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+	defer session.Stop()
+
+	position, ok := firstNonZeroPosition(initialSnapshot.Board)
+	if !ok {
+		t.Fatal("firstNonZeroPosition returned false, want a removable number")
+	}
+
+	if err := session.SubmitRemoveNumber(context.Background(), position); err != nil {
+		t.Fatalf("SubmitRemoveNumber returned unexpected error: %v", err)
+	}
+
+	removeSnapshot := <-session.Snapshots()
+	if !removeSnapshot.RemoveNumberUsed {
+		t.Fatal("removeSnapshot.RemoveNumberUsed = false, want true")
+	}
+	if removeSnapshot.Score != initialSnapshot.Score {
+		t.Fatalf("removeSnapshot.Score = %d, want %d", removeSnapshot.Score, initialSnapshot.Score)
+	}
+	if removeSnapshot.Board[position.Row][position.Col] != 0 {
+		t.Fatalf("removeSnapshot.Board[%d][%d] = %d, want 0", position.Row, position.Col, removeSnapshot.Board[position.Row][position.Col])
+	}
+}
+
 func TestGameSessionStopCancelsLifecycle(t *testing.T) {
 	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
 	if err != nil {
@@ -618,6 +767,18 @@ func TestGameSessionSubmitReshuffleAfterExpiryReturnsGameOver(t *testing.T) {
 	}
 }
 
+func TestGameSessionSubmitRemoveNumberAfterExpiryReturnsGameOver(t *testing.T) {
+	session := &GameSession{
+		expiresAt: time.Now().Add(-time.Second),
+		done:      make(chan struct{}),
+		closing:   make(chan struct{}),
+	}
+
+	if err := session.SubmitRemoveNumber(context.Background(), Position{}); err != ErrGameOver {
+		t.Fatalf("SubmitRemoveNumber error = %v, want %v", err, ErrGameOver)
+	}
+}
+
 func TestGameSessionSubmitMoveAfterStopReturnsSessionClosed(t *testing.T) {
 	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
 	if err != nil {
@@ -643,6 +804,20 @@ func TestGameSessionSubmitReshuffleAfterStopReturnsSessionClosed(t *testing.T) {
 
 	if err := session.SubmitReshuffle(context.Background()); err != ErrSessionClosed {
 		t.Fatalf("SubmitReshuffle error = %v, want %v", err, ErrSessionClosed)
+	}
+}
+
+func TestGameSessionSubmitRemoveNumberAfterStopReturnsSessionClosed(t *testing.T) {
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+
+	session.Stop()
+	<-session.Done()
+
+	if err := session.SubmitRemoveNumber(context.Background(), Position{}); err != ErrSessionClosed {
+		t.Fatalf("SubmitRemoveNumber error = %v, want %v", err, ErrSessionClosed)
 	}
 }
 
@@ -691,6 +866,15 @@ func TestGameSessionConcurrentSubmitActionsAndStopDoesNotPanic(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			_ = session.SubmitReshuffle(ctx)
+		}()
+	}
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_ = session.SubmitRemoveNumber(ctx, Position{Row: 99, Col: 99})
 		}()
 	}
 
@@ -747,4 +931,16 @@ func firstValidSelection(board Board) (Selection, bool) {
 	}
 
 	return validMoves[0], true
+}
+
+func firstNonZeroPosition(board Board) (Position, bool) {
+	for row := range board {
+		for col := range board[row] {
+			if board[row][col] != 0 {
+				return Position{Row: row, Col: col}, true
+			}
+		}
+	}
+
+	return Position{}, false
 }

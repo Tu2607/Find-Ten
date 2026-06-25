@@ -20,6 +20,10 @@ type submitMoveRequest struct {
 	Selection *selectionRequest `json:"selection"`
 }
 
+type submitRemoveNumberRequest struct {
+	Position *positionRequest `json:"position"`
+}
+
 type selectionRequest struct {
 	Start *positionRequest `json:"start"`
 	End   *positionRequest `json:"end"`
@@ -35,26 +39,28 @@ type submitMoveResponse struct {
 }
 
 type snapshotResponse struct {
-	Sequence       int64     `json:"sequence"`
-	Board          [][]int   `json:"board"`
-	Score          int       `json:"score"`
-	GameOver       bool      `json:"gameOver"`
-	GameOverReason int       `json:"gameOverReason"`
-	ValidMoveCount int       `json:"validMoveCount"`
-	ReshuffleUsed  bool      `json:"reshuffleUsed"`
-	SnapshotTime   time.Time `json:"snapshotTime"`
+	Sequence         int64     `json:"sequence"`
+	Board            [][]int   `json:"board"`
+	Score            int       `json:"score"`
+	GameOver         bool      `json:"gameOver"`
+	GameOverReason   int       `json:"gameOverReason"`
+	ValidMoveCount   int       `json:"validMoveCount"`
+	ReshuffleUsed    bool      `json:"reshuffleUsed"`
+	RemoveNumberUsed bool      `json:"removeNumberUsed"`
+	SnapshotTime     time.Time `json:"snapshotTime"`
 }
 
 func newSnapshotResponse(snapshot game.GameSnapshot) snapshotResponse {
 	return snapshotResponse{
-		Sequence:       snapshot.Sequence,
-		Board:          [][]int(snapshot.Board),
-		Score:          snapshot.Score,
-		GameOver:       snapshot.GameOver,
-		GameOverReason: int(snapshot.GameOverReason),
-		ValidMoveCount: snapshot.ValidMoveCount,
-		ReshuffleUsed:  snapshot.ReshuffleUsed,
-		SnapshotTime:   snapshot.SnapshotTime,
+		Sequence:         snapshot.Sequence,
+		Board:            [][]int(snapshot.Board),
+		Score:            snapshot.Score,
+		GameOver:         snapshot.GameOver,
+		GameOverReason:   int(snapshot.GameOverReason),
+		ValidMoveCount:   snapshot.ValidMoveCount,
+		ReshuffleUsed:    snapshot.ReshuffleUsed,
+		RemoveNumberUsed: snapshot.RemoveNumberUsed,
+		SnapshotTime:     snapshot.SnapshotTime,
 	}
 }
 
@@ -79,5 +85,16 @@ func (r submitMoveRequest) toSelection() (game.Selection, bool) {
 			Row: *r.Selection.End.Row,
 			Col: *r.Selection.End.Col,
 		},
+	}, true
+}
+
+func (r submitRemoveNumberRequest) toPosition() (game.Position, bool) {
+	if r.Position == nil || r.Position.Row == nil || r.Position.Col == nil {
+		return game.Position{}, false
+	}
+
+	return game.Position{
+		Row: *r.Position.Row,
+		Col: *r.Position.Col,
 	}, true
 }

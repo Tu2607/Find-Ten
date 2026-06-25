@@ -10,19 +10,30 @@
 
 body {
   margin: 0;
+  min-height: 100vh;
 }
 
 .shell {
-  width: min(1120px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 24px;
+  width: min(1180px, calc(100vw - 32px));
+  min-height: 100vh;
   margin: 0 auto;
   padding: 24px 0;
 }
 
-.topbar {
+.sidebar {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 16px;
+  min-width: 0;
+}
+
+.topbar {
+  display: grid;
+  gap: 18px;
+  align-content: start;
 }
 
 h1 {
@@ -46,8 +57,7 @@ h1 {
 }
 
 .controls {
-  display: flex;
-  align-items: flex-end;
+  display: grid;
   gap: 10px;
 }
 
@@ -69,13 +79,12 @@ button {
 }
 
 .stats {
-  display: flex;
+  display: grid;
   gap: 12px;
-  margin: 16px 0;
 }
 
 .stats div {
-  min-width: 120px;
+  min-width: 0;
 }
 
 .stats span {
@@ -91,10 +100,18 @@ button {
 }
 
 .stats .skill {
-  min-width: 140px;
+  min-width: 0;
 }
 
-#reshuffleButton {
+.skill-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 2px;
+}
+
+#reshuffleButton,
+#removeNumberButton {
   width: 100%;
   margin-top: 2px;
   border: 1px solid #b8c3d1;
@@ -103,26 +120,31 @@ button {
   color: #171a20;
 }
 
-#reshuffleButton:not(:disabled):hover {
+#reshuffleButton:not(:disabled):hover,
+#removeNumberButton:not(:disabled):hover {
   background: #edf6ff;
 }
 
-#reshuffleButton:disabled {
+#reshuffleButton:disabled,
+#removeNumberButton:disabled {
   cursor: not-allowed;
   background: #eef1f5;
   color: #7a8493;
 }
 
 .board-panel {
-  overflow: auto;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .board {
   --size: 9;
   display: grid;
-  grid-template-columns: repeat(var(--size), minmax(30px, 1fr));
+  grid-template-columns: repeat(var(--size), minmax(0, 1fr));
   gap: 1px;
-  width: min(82vh, 100%);
+  width: min(100%, calc(100vh - 48px), 760px);
   max-width: 760px;
   aspect-ratio: 1;
   border: 1px solid #c6ceda;
@@ -164,15 +186,36 @@ button {
   background: #8fc7ff;
 }
 
-@media (max-width: 720px) {
-  .topbar,
-  .controls,
+@media (max-width: 820px) {
+  .shell {
+    display: block;
+    width: min(760px, calc(100vw - 32px));
+    min-height: 0;
+  }
+
+  .sidebar {
+    margin-bottom: 16px;
+  }
+
   .stats {
-    align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .stats .skill {
+    grid-column: 1 / -1;
+  }
+
+  .board-panel {
+    overflow: visible;
   }
 
   .board {
     width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .stats {
+    grid-template-columns: 1fr;
   }
 }

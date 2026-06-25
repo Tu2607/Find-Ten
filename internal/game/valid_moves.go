@@ -49,10 +49,17 @@ func buildValidMoveCache(board Board) ([]Selection, map[Selection]struct{}) {
 	return validMoves, validMoveSet
 }
 
-// boundCheck checks if the selection is within the bounds of the board
-func boundCheck(selection Selection, board Board) bool {
-	return selection.Start.Row >= 0 && selection.Start.Row < len(board) &&
-		selection.Start.Col >= 0 && selection.Start.Col < len(board[0]) &&
-		selection.End.Row >= 0 && selection.End.Row < len(board) &&
-		selection.End.Col >= 0 && selection.End.Col < len(board[0])
+// selectionBoundCheck checks if the selection is within the bounds of the board.
+func selectionBoundCheck(selection Selection, board Board) bool {
+	return positionBoundCheck(selection.Start, board) &&
+		positionBoundCheck(selection.End, board)
+}
+
+func positionBoundCheck(position Position, board Board) bool {
+	return len(board) > 0 &&
+		len(board[0]) > 0 &&
+		position.Row >= 0 &&
+		position.Row < len(board) &&
+		position.Col >= 0 &&
+		position.Col < len(board[0])
 }
