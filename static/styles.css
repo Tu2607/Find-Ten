@@ -105,13 +105,14 @@ button {
 
 .skill-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   margin-top: 2px;
 }
 
 #reshuffleButton,
-#removeNumberButton {
+#removeNumberButton,
+#hintButton {
   width: 100%;
   margin-top: 2px;
   border: 1px solid #b8c3d1;
@@ -121,12 +122,14 @@ button {
 }
 
 #reshuffleButton:not(:disabled):hover,
-#removeNumberButton:not(:disabled):hover {
+#removeNumberButton:not(:disabled):hover,
+#hintButton:not(:disabled):hover {
   background: #edf6ff;
 }
 
 #reshuffleButton:disabled,
-#removeNumberButton:disabled {
+#removeNumberButton:disabled,
+#hintButton:disabled {
   cursor: not-allowed;
   background: #eef1f5;
   color: #7a8493;
@@ -184,6 +187,15 @@ button {
 
 .cell.corner {
   background: #8fc7ff;
+}
+
+.cell.hint {
+  background: #fff4ba;
+  box-shadow: inset 0 0 0 2px #c38a00;
+}
+
+.cell.hint.selected {
+  background: #ffe082;
 }
 
 @media (max-width: 820px) {

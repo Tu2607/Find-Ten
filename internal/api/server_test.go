@@ -63,6 +63,12 @@ func TestServerRouteDispatch(t *testing.T) {
 			wantStatus: http.StatusNotFound,
 		},
 		{
+			name:       "hint unknown game",
+			method:     http.MethodPost,
+			path:       "/games/test-game/hint",
+			wantStatus: http.StatusNotFound,
+		},
+		{
 			name:       "delete unknown game",
 			method:     http.MethodDelete,
 			path:       "/games/test-game",
@@ -108,6 +114,12 @@ func TestServerRouteDispatch(t *testing.T) {
 			name:       "unsupported remove number method",
 			method:     http.MethodGet,
 			path:       "/games/test-game/remove-number",
+			wantStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:       "unsupported hint method",
+			method:     http.MethodGet,
+			path:       "/games/test-game/hint",
 			wantStatus: http.StatusMethodNotAllowed,
 		},
 	}
@@ -200,6 +212,9 @@ func TestCreateGame(t *testing.T) {
 	}
 	if body.InitialSnapshot.RemoveNumberUsed {
 		t.Fatal("InitialSnapshot.RemoveNumberUsed = true, want false")
+	}
+	if body.InitialSnapshot.HintUsed {
+		t.Fatal("InitialSnapshot.HintUsed = true, want false")
 	}
 	if body.ExpiresAt.IsZero() {
 		t.Fatal("ExpiresAt is zero, want session deadline")
@@ -401,6 +416,11 @@ func TestDeletedGameRequestsReturnNotFound(t *testing.T) {
 			method: http.MethodPost,
 			path:   "/games/" + created.response.GameID + "/remove-number",
 			body:   strings.NewReader(removeNumberJSONForTest(game.Position{})),
+		},
+		{
+			name:   "hint",
+			method: http.MethodPost,
+			path:   "/games/" + created.response.GameID + "/hint",
 		},
 		{
 			name:   "snapshots",
@@ -792,6 +812,111 @@ func TestSubmitRemoveNumberStoppedSessionReturnsGone(t *testing.T) {
 	created.stored.session.Stop()
 
 	response := postRemoveNumberForTest(t, server, created.response.GameID, game.Position{})
+
+	if response.Code != http.StatusGone {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusGone)
+	}
+}
+
+func TestSubmitHint(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	want, ok := firstValidSelection(created.response.InitialSnapshot.Board)
+	if !ok {
+		t.Fatal("firstValidSelection returned false, want valid move")
+	}
+
+	response := postHintForTest(t, server, created.response.GameID)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var body hintResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode hint response: %v", err)
+	}
+	got := selectionResponseToGameSelection(body.Selection)
+	if got != want {
+		t.Fatalf("selection = %+v, want %+v", got, want)
+	}
+}
+
+func TestSubmitHintPublishesSnapshotToSSE(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	testServer := httptest.NewServer(server)
+	defer testServer.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	snapshotRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, testServer.URL+"/games/"+created.response.GameID+"/snapshots", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext returned error: %v", err)
+	}
+
+	snapshotResponse, err := testServer.Client().Do(snapshotRequest)
+	if err != nil {
+		t.Fatalf("GET snapshots returned error: %v", err)
+	}
+	defer snapshotResponse.Body.Close()
+
+	hintResponse := postHintHTTPForTest(t, testServer.Client(), testServer.URL, created.response.GameID)
+	defer hintResponse.Body.Close()
+	if hintResponse.StatusCode != http.StatusOK {
+		t.Fatalf("hint status = %d, want %d", hintResponse.StatusCode, http.StatusOK)
+	}
+
+	event := readSnapshotEvent(t, snapshotResponse.Body)
+	if event.Sequence != 2 {
+		t.Fatalf("event.Sequence = %d, want 2", event.Sequence)
+	}
+	if !event.HintUsed {
+		t.Fatal("event.HintUsed = false, want true")
+	}
+	if event.Score != created.response.InitialSnapshot.Score {
+		t.Fatalf("event.Score = %d, want %d", event.Score, created.response.InitialSnapshot.Score)
+	}
+	if got, want := countZeroCellsForTest(event.Board), countZeroCellsForTest(created.response.InitialSnapshot.Board); got != want {
+		t.Fatalf("hint snapshot zero count = %d, want %d", got, want)
+	}
+}
+
+func TestSubmitHintUnknownGameReturnsNotFound(t *testing.T) {
+	server := NewServer().(*Server)
+	response := postHintForTest(t, server, "missing")
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestSubmitHintAlreadyUsedReturnsConflict(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	response := postHintForTest(t, server, created.response.GameID)
+	if response.Code != http.StatusOK {
+		t.Fatalf("first hint status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	response = postHintForTest(t, server, created.response.GameID)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("second hint status = %d, want %d", response.Code, http.StatusConflict)
+	}
+}
+
+func TestSubmitHintStoppedSessionReturnsGone(t *testing.T) {
+	server := NewServer().(*Server)
+	created := createGameForTest(t, server, 9)
+	created.stored.session.Stop()
+
+	response := postHintForTest(t, server, created.response.GameID)
 
 	if response.Code != http.StatusGone {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusGone)
@@ -1256,6 +1381,28 @@ func postRemoveNumberHTTPForTest(t *testing.T, client *http.Client, serverURL st
 	return response
 }
 
+func postHintForTest(t *testing.T, server http.Handler, gameID string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodPost, "/games/"+gameID+"/hint", nil)
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	return response
+}
+
+func postHintHTTPForTest(t *testing.T, client *http.Client, serverURL string, gameID string) *http.Response {
+	t.Helper()
+
+	response, err := client.Post(serverURL+"/games/"+gameID+"/hint", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST hint returned error: %v", err)
+	}
+
+	return response
+}
+
 func moveJSONForTest(selection game.Selection) string {
 	return `{"selection":{"start":{"row":` +
 		strconv.Itoa(selection.Start.Row) +
@@ -1274,6 +1421,19 @@ func removeNumberJSONForTest(position game.Position) string {
 		`,"col":` +
 		strconv.Itoa(position.Col) +
 		`}}`
+}
+
+func selectionResponseToGameSelection(selection selectionResponse) game.Selection {
+	return game.Selection{
+		Start: game.Position{
+			Row: selection.Start.Row,
+			Col: selection.Start.Col,
+		},
+		End: game.Position{
+			Row: selection.End.Row,
+			Col: selection.End.Col,
+		},
+	}
 }
 
 func countZeroCellsForTest(board [][]int) int {

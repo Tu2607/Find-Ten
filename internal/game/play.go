@@ -83,6 +83,19 @@ func (s *GameSession) SubmitRemoveNumber(ctx context.Context, position Position)
 	})
 }
 
+func (s *GameSession) SubmitHint(ctx context.Context) (Selection, error) {
+	var hint Selection
+
+	if err := s.submitAction(ctx, PlayerActionRequest{
+		Type: PlayerActionHint,
+		Hint: &hint,
+	}); err != nil {
+		return Selection{}, err
+	}
+
+	return hint, nil
+}
+
 func (s *GameSession) submitAction(ctx context.Context, request PlayerActionRequest) error {
 	if deadlineExpired(s.expiresAt, time.Now()) {
 		return ErrGameOver
@@ -208,6 +221,15 @@ func applyPlayerActionBeforeDeadline(state *GameState, request PlayerActionReque
 		return ApplyReshuffle(state)
 	case PlayerActionRemoveNumber:
 		return ApplyRemoveNumber(state, request.Position)
+	case PlayerActionHint:
+		hint, err := ApplyHint(state)
+		if err != nil {
+			return err
+		}
+		if request.Hint != nil {
+			*request.Hint = hint
+		}
+		return nil
 	default:
 		return ErrUnknownPlayerAction
 	}
@@ -256,6 +278,7 @@ func newGameSnapshot(state *GameState, sequence int64) GameSnapshot {
 	snapshot.ValidMoveCount = len(state.ValidMoves)
 	snapshot.ReshuffleUsed = state.ReshuffleUsed
 	snapshot.RemoveNumberUsed = state.RemoveNumberUsed
+	snapshot.HintUsed = state.HintUsed
 
 	return snapshot
 }

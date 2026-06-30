@@ -10,6 +10,10 @@ const state = {
   removeNumberUsed: false,
   removeNumberPending: false,
   removeMode: false,
+  hintUsed: false,
+  hintPending: false,
+  hintHighlight: null,
+  hintSnapshotPending: false,
   selectedStart: null,
   hoverCell: null,
   expiresAt: null,
@@ -24,6 +28,7 @@ const gameEl = document.getElementById("gameValue");
 const statusEl = document.getElementById("statusText");
 const reshuffleButtonEl = document.getElementById("reshuffleButton");
 const removeNumberButtonEl = document.getElementById("removeNumberButton");
+const hintButtonEl = document.getElementById("hintButton");
 
 document.getElementById("startForm").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -32,6 +37,7 @@ document.getElementById("startForm").addEventListener("submit", async (event) =>
 
 reshuffleButtonEl.addEventListener("click", submitReshuffle);
 removeNumberButtonEl.addEventListener("click", enableRemoveMode);
+hintButtonEl.addEventListener("click", submitHint);
 
 async function startGame(size) {
   const previousGameId = state.gameId;
@@ -75,6 +81,10 @@ async function startGame(size) {
   state.removeNumberUsed = false;
   state.removeNumberPending = false;
   state.removeMode = false;
+  state.hintUsed = false;
+  state.hintPending = false;
+  state.hintHighlight = null;
+  state.hintSnapshotPending = false;
 
   applySnapshot(game.initialSnapshot);
   openSnapshots(game.gameId);
@@ -112,8 +122,16 @@ function applySnapshot(snapshot) {
   state.gameOverReason = snapshot.gameOverReason;
   state.reshuffleUsed = Boolean(snapshot.reshuffleUsed);
   state.removeNumberUsed = Boolean(snapshot.removeNumberUsed);
+  state.hintUsed = Boolean(snapshot.hintUsed);
   state.reshufflePending = false;
   state.removeNumberPending = false;
+  state.hintPending = false;
+  if (state.hintHighlight && state.hintSnapshotPending && snapshot.hintUsed) {
+    state.hintSnapshotPending = false;
+  } else {
+    state.hintHighlight = null;
+    state.hintSnapshotPending = false;
+  }
   state.removeMode = false;
   state.selectedStart = null;
   state.hoverCell = null;
@@ -164,6 +182,9 @@ function renderBoard() {
 
       if (value === 0) {
         cell.classList.add("cleared");
+      }
+      if (value !== 0 && state.hintHighlight && positionInsideSelection({ row: rowIndex, col: colIndex }, state.hintHighlight)) {
+        cell.classList.add("hint");
       }
       cell.addEventListener("click", () => handleCellClick(rowIndex, colIndex));
       cell.addEventListener("mouseenter", () => handleCellHover(rowIndex, colIndex));
@@ -220,6 +241,77 @@ async function submitReshuffle() {
 
   updateSkillButtons();
   setStatus("Reshuffle failed.");
+}
+
+async function submitHint() {
+  if (!state.gameId || state.gameOver || state.hintUsed || state.hintPending) {
+    return;
+  }
+
+  state.hintPending = true;
+  state.removeMode = false;
+  state.selectedStart = null;
+  state.hoverCell = null;
+  updateSelectionPreview();
+  updateSkillButtons();
+  setStatus("Finding hint...");
+
+  let response;
+  try {
+    response = await fetch(`/games/${state.gameId}/hint`, {
+      method: "POST"
+    });
+  } catch {
+    state.hintPending = false;
+    updateSkillButtons();
+    setStatus("Could not get hint.");
+    return;
+  }
+
+  if (response.ok) {
+    let body;
+    try {
+      body = await response.json();
+    } catch {
+      state.hintPending = false;
+      updateSkillButtons();
+      setStatus("Hint failed.");
+      return;
+    }
+    if (!body.selection || !body.selection.start || !body.selection.end) {
+      state.hintPending = false;
+      updateSkillButtons();
+      setStatus("Hint failed.");
+      return;
+    }
+    const hintSnapshotAlreadyReceived = state.hintUsed;
+    state.hintHighlight = body.selection;
+    state.hintSnapshotPending = !hintSnapshotAlreadyReceived;
+    state.hintUsed = true;
+    state.hintPending = false;
+    updateSkillButtons();
+    renderBoard();
+    setStatus("Hint shown.");
+    return;
+  }
+
+  state.hintPending = false;
+  if (response.status === 409 || response.status === 410) {
+    if (response.status === 410) {
+      state.gameOver = true;
+      state.hintHighlight = null;
+      state.hintSnapshotPending = false;
+      gameEl.textContent = "Ended";
+      stopCountdown();
+      renderBoard();
+    }
+    updateSkillButtons();
+    setStatus(response.status === 409 ? "Hint unavailable." : "Game ended.");
+    return;
+  }
+
+  updateSkillButtons();
+  setStatus("Hint failed.");
 }
 
 function enableRemoveMode() {
@@ -395,6 +487,18 @@ function updateSelectionPreview() {
   });
 }
 
+function positionInsideSelection(position, selection) {
+  const minRow = Math.min(selection.start.row, selection.end.row);
+  const maxRow = Math.max(selection.start.row, selection.end.row);
+  const minCol = Math.min(selection.start.col, selection.end.col);
+  const maxCol = Math.max(selection.start.col, selection.end.col);
+
+  return position.row >= minRow &&
+    position.row <= maxRow &&
+    position.col >= minCol &&
+    position.col <= maxCol;
+}
+
 function startCountdown() {
   renderCountdown();
   state.countdownTimer = setInterval(renderCountdown, 250);
@@ -443,6 +547,7 @@ function setStatus(message) {
 function updateSkillButtons() {
   updateReshuffleButton();
   updateRemoveNumberButton();
+  updateHintButton();
 }
 
 function updateReshuffleButton() {
@@ -479,6 +584,22 @@ function updateRemoveNumberButton() {
   }
 
   removeNumberButtonEl.textContent = "Remove";
+}
+
+function updateHintButton() {
+  const disabled = !state.gameId || state.gameOver || state.hintUsed || state.hintPending;
+  hintButtonEl.disabled = disabled;
+
+  if (state.hintPending) {
+    hintButtonEl.textContent = "Hinting";
+    return;
+  }
+  if (state.hintUsed) {
+    hintButtonEl.textContent = "Used";
+    return;
+  }
+
+  hintButtonEl.textContent = "Hint";
 }
 
 function gameOverText(reason) {

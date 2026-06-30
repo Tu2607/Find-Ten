@@ -168,6 +168,25 @@ func (s *Server) handleSubmitRemoveNumber(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(submitMoveResponse{Accepted: true})
 }
 
+func (s *Server) handleHint(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	stored, ok := s.store.get(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "game not found")
+		return
+	}
+
+	hint, err := stored.session.SubmitHint(r.Context())
+	if err != nil {
+		writeMoveError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(hintResponse{Selection: newSelectionResponse(hint)})
+}
+
 func (s *Server) handleGameSnapshots(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	stored, ok := s.store.get(id)
@@ -231,7 +250,7 @@ func writeMoveError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, game.ErrGameOver):
 		writeError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, game.ErrReshuffleAlreadyUsed), errors.Is(err, game.ErrRemoveNumberAlreadyUsed):
+	case errors.Is(err, game.ErrReshuffleAlreadyUsed), errors.Is(err, game.ErrRemoveNumberAlreadyUsed), errors.Is(err, game.ErrHintAlreadyUsed), errors.Is(err, game.ErrHintNoValidMoves):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, game.ErrSessionClosed):
 		writeError(w, http.StatusGone, err.Error())

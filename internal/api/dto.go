@@ -38,6 +38,20 @@ type submitMoveResponse struct {
 	Accepted bool `json:"accepted"`
 }
 
+type hintResponse struct {
+	Selection selectionResponse `json:"selection"`
+}
+
+type selectionResponse struct {
+	Start positionResponse `json:"start"`
+	End   positionResponse `json:"end"`
+}
+
+type positionResponse struct {
+	Row int `json:"row"`
+	Col int `json:"col"`
+}
+
 type snapshotResponse struct {
 	Sequence         int64     `json:"sequence"`
 	Board            [][]int   `json:"board"`
@@ -47,6 +61,7 @@ type snapshotResponse struct {
 	ValidMoveCount   int       `json:"validMoveCount"`
 	ReshuffleUsed    bool      `json:"reshuffleUsed"`
 	RemoveNumberUsed bool      `json:"removeNumberUsed"`
+	HintUsed         bool      `json:"hintUsed"`
 	SnapshotTime     time.Time `json:"snapshotTime"`
 }
 
@@ -60,7 +75,21 @@ func newSnapshotResponse(snapshot game.GameSnapshot) snapshotResponse {
 		ValidMoveCount:   snapshot.ValidMoveCount,
 		ReshuffleUsed:    snapshot.ReshuffleUsed,
 		RemoveNumberUsed: snapshot.RemoveNumberUsed,
+		HintUsed:         snapshot.HintUsed,
 		SnapshotTime:     snapshot.SnapshotTime,
+	}
+}
+
+func newSelectionResponse(selection game.Selection) selectionResponse {
+	return selectionResponse{
+		Start: positionResponse{
+			Row: selection.Start.Row,
+			Col: selection.Start.Col,
+		},
+		End: positionResponse{
+			Row: selection.End.Row,
+			Col: selection.End.Col,
+		},
 	}
 }
 

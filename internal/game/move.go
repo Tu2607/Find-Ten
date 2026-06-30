@@ -14,6 +14,8 @@ var (
 	ErrReshuffleFailed           = errors.New("failed to generate reshuffled board")
 	ErrRemoveNumberAlreadyUsed   = errors.New("remove number already used")
 	ErrRemoveNumberInvalidTarget = errors.New("remove number target is already cleared")
+	ErrHintAlreadyUsed           = errors.New("hint already used")
+	ErrHintNoValidMoves          = errors.New("no valid moves available for hint")
 	ErrUnknownPlayerAction       = errors.New("unknown player action")
 )
 

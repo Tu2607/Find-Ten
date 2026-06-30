@@ -30,6 +30,7 @@ const (
 	PlayerActionMove PlayerActionType = iota + 1
 	PlayerActionReshuffle
 	PlayerActionRemoveNumber
+	PlayerActionHint
 )
 
 type PlayerActionRequest struct {
@@ -37,6 +38,7 @@ type PlayerActionRequest struct {
 	Selection Selection
 	Position  Position
 	Result    chan error
+	Hint      *Selection
 }
 
 type GameOverReason int
@@ -56,6 +58,7 @@ type GameState struct {
 	GameOverReason   GameOverReason
 	ReshuffleUsed    bool
 	RemoveNumberUsed bool
+	HintUsed         bool
 
 	validMoveSet map[Selection]struct{}
 }
@@ -69,6 +72,7 @@ type GameSnapshot struct {
 	ValidMoveCount   int
 	ReshuffleUsed    bool
 	RemoveNumberUsed bool
+	HintUsed         bool
 	SnapshotTime     time.Time
 }
 

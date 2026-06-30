@@ -34,5 +34,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /games/{id}/reshuffle", handleMethodNotAllowed)
 	s.mux.HandleFunc("POST /games/{id}/remove-number", s.handleSubmitRemoveNumber)
 	s.mux.HandleFunc("GET /games/{id}/remove-number", handleMethodNotAllowed)
+	s.mux.HandleFunc("POST /games/{id}/hint", s.handleHint)
+	s.mux.HandleFunc("GET /games/{id}/hint", handleMethodNotAllowed)
 	s.mux.Handle("GET /", http.FileServer(http.Dir("./static/")))
 }

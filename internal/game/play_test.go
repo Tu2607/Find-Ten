@@ -2,6 +2,7 @@ package game
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sync"
 	"testing"
@@ -220,7 +221,56 @@ func TestRunGameEmitsRemoveNumberSnapshot(t *testing.T) {
 	}
 }
 
-func TestRunGameSequencesMoveReshuffleAndRemoveNumberSnapshots(t *testing.T) {
+func TestRunGameEmitsHintSnapshotAndResult(t *testing.T) {
+	state := &GameState{
+		Board: Board{
+			{4, 6},
+			{1, 9},
+		},
+		Score: 500,
+	}
+	rebuildValidMoveCache(state)
+	want := state.ValidMoves[0]
+
+	actions := make(chan PlayerActionRequest, 1)
+	expired := make(chan struct{})
+	snapshots := make(chan GameSnapshot, 1)
+	results := make(chan error, 1)
+	var hint Selection
+	actions <- PlayerActionRequest{
+		Type:   PlayerActionHint,
+		Result: results,
+		Hint:   &hint,
+	}
+	close(actions)
+
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+
+	if err := <-results; err != nil {
+		t.Fatalf("hint result error = %v, want nil", err)
+	}
+	if hint != want {
+		t.Fatalf("hint = %+v, want %+v", hint, want)
+	}
+	snapshot := <-snapshots
+	if snapshot.Sequence != 2 {
+		t.Fatalf("snapshot.Sequence = %d, want 2", snapshot.Sequence)
+	}
+	if !snapshot.HintUsed {
+		t.Fatal("snapshot.HintUsed = false, want true")
+	}
+	if !state.HintUsed {
+		t.Fatal("state.HintUsed = false, want true")
+	}
+	if snapshot.Score != 500 {
+		t.Fatalf("snapshot.Score = %d, want 500", snapshot.Score)
+	}
+	if !reflect.DeepEqual(snapshot.Board, state.Board) {
+		t.Fatalf("snapshot.Board = %+v, want %+v", snapshot.Board, state.Board)
+	}
+}
+
+func TestRunGameSequencesMoveReshuffleRemoveNumberAndHintSnapshots(t *testing.T) {
 	state := &GameState{
 		Board: Board{
 			{4, 6, 9},
@@ -230,9 +280,9 @@ func TestRunGameSequencesMoveReshuffleAndRemoveNumberSnapshots(t *testing.T) {
 	}
 	rebuildValidMoveCache(state)
 
-	actions := make(chan PlayerActionRequest, 3)
+	actions := make(chan PlayerActionRequest, 4)
 	expired := make(chan struct{})
-	snapshots := make(chan GameSnapshot, 3)
+	snapshots := make(chan GameSnapshot, 4)
 	actions <- PlayerActionRequest{
 		Type:     PlayerActionRemoveNumber,
 		Position: Position{Row: 1, Col: 0},
@@ -245,6 +295,7 @@ func TestRunGameSequencesMoveReshuffleAndRemoveNumberSnapshots(t *testing.T) {
 		},
 	}
 	actions <- PlayerActionRequest{Type: PlayerActionReshuffle}
+	actions <- PlayerActionRequest{Type: PlayerActionHint}
 	close(actions)
 
 	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
@@ -252,6 +303,7 @@ func TestRunGameSequencesMoveReshuffleAndRemoveNumberSnapshots(t *testing.T) {
 	first := <-snapshots
 	second := <-snapshots
 	third := <-snapshots
+	fourth := <-snapshots
 	if first.Sequence != 2 {
 		t.Fatalf("first.Sequence = %d, want 2", first.Sequence)
 	}
@@ -261,11 +313,17 @@ func TestRunGameSequencesMoveReshuffleAndRemoveNumberSnapshots(t *testing.T) {
 	if third.Sequence != 4 {
 		t.Fatalf("third.Sequence = %d, want 4", third.Sequence)
 	}
+	if fourth.Sequence != 5 {
+		t.Fatalf("fourth.Sequence = %d, want 5", fourth.Sequence)
+	}
 	if !first.RemoveNumberUsed {
 		t.Fatal("first.RemoveNumberUsed = false, want true")
 	}
 	if !third.ReshuffleUsed {
 		t.Fatal("third.ReshuffleUsed = false, want true")
+	}
+	if !fourth.HintUsed {
+		t.Fatal("fourth.HintUsed = false, want true")
 	}
 }
 
@@ -458,6 +516,45 @@ func TestRunGameRejectedRemoveNumberDoesNotEmitSnapshotOrConsumeSkill(t *testing
 	}
 }
 
+func TestRunGameRejectedHintDoesNotEmitSnapshotOrConsumeSkill(t *testing.T) {
+	state := &GameState{
+		Board: Board{
+			{4, 6},
+			{1, 9},
+		},
+		HintUsed: true,
+	}
+	rebuildValidMoveCache(state)
+
+	actions := make(chan PlayerActionRequest, 1)
+	expired := make(chan struct{})
+	snapshots := make(chan GameSnapshot, 1)
+	results := make(chan error, 1)
+	var hint Selection
+	actions <- PlayerActionRequest{
+		Type:   PlayerActionHint,
+		Result: results,
+		Hint:   &hint,
+	}
+	close(actions)
+
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+
+	if err := <-results; !errors.Is(err, ErrHintAlreadyUsed) {
+		t.Fatalf("hint result error = %v, want %v", err, ErrHintAlreadyUsed)
+	}
+	if !state.HintUsed {
+		t.Fatal("state.HintUsed = false, want true")
+	}
+	if hint != (Selection{}) {
+		t.Fatalf("hint = %+v, want zero value", hint)
+	}
+	_, ok := <-snapshots
+	if ok {
+		t.Fatal("received snapshot after rejected hint, want none")
+	}
+}
+
 func TestRunGameUnknownActionDoesNotEmitSnapshot(t *testing.T) {
 	state := &GameState{
 		Board: testReshuffleBoard(),
@@ -582,6 +679,45 @@ func TestRunGameRejectsRemoveNumberProcessedAfterExpiry(t *testing.T) {
 	}
 }
 
+func TestRunGameRejectsHintProcessedAfterExpiry(t *testing.T) {
+	state := &GameState{
+		Board: Board{
+			{4, 6},
+		},
+	}
+	rebuildValidMoveCache(state)
+
+	actions := make(chan PlayerActionRequest, 1)
+	expired := make(chan struct{})
+	snapshots := make(chan GameSnapshot, 1)
+	results := make(chan error, 1)
+	var hint Selection
+	actions <- PlayerActionRequest{
+		Type:   PlayerActionHint,
+		Result: results,
+		Hint:   &hint,
+	}
+
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(-time.Second))
+
+	if err := <-results; !errors.Is(err, ErrGameOver) {
+		t.Fatalf("hint result error = %v, want %v", err, ErrGameOver)
+	}
+	if state.GameOverReason != GameOverTimeExpired {
+		t.Fatalf("state.GameOverReason = %v, want %v", state.GameOverReason, GameOverTimeExpired)
+	}
+	if state.HintUsed {
+		t.Fatal("state.HintUsed = true, want false")
+	}
+	if hint != (Selection{}) {
+		t.Fatalf("hint = %+v, want zero value", hint)
+	}
+	_, ok := <-snapshots
+	if ok {
+		t.Fatal("received snapshot for expired hint, want none")
+	}
+}
+
 func TestNewGameSessionReturnsInitialSnapshot(t *testing.T) {
 	session, snapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize)
 	if err != nil {
@@ -603,6 +739,9 @@ func TestNewGameSessionReturnsInitialSnapshot(t *testing.T) {
 	}
 	if snapshot.RemoveNumberUsed {
 		t.Fatal("snapshot.RemoveNumberUsed = true, want false")
+	}
+	if snapshot.HintUsed {
+		t.Fatal("snapshot.HintUsed = true, want false")
 	}
 }
 
@@ -728,6 +867,108 @@ func TestGameSessionSubmitRemoveNumber(t *testing.T) {
 	}
 }
 
+func TestGameSessionSubmitHint(t *testing.T) {
+	session, initialSnapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+	defer session.Stop()
+
+	want, ok := firstValidSelection(initialSnapshot.Board)
+	if !ok {
+		t.Fatal("firstValidSelection returned false, want a valid move")
+	}
+
+	hint, err := session.SubmitHint(context.Background())
+	if err != nil {
+		t.Fatalf("SubmitHint returned unexpected error: %v", err)
+	}
+	if hint != want {
+		t.Fatalf("hint = %+v, want %+v", hint, want)
+	}
+
+	hintSnapshot := <-session.Snapshots()
+	if !hintSnapshot.HintUsed {
+		t.Fatal("hintSnapshot.HintUsed = false, want true")
+	}
+	if hintSnapshot.Score != initialSnapshot.Score {
+		t.Fatalf("hintSnapshot.Score = %d, want %d", hintSnapshot.Score, initialSnapshot.Score)
+	}
+	if !reflect.DeepEqual(hintSnapshot.Board, initialSnapshot.Board) {
+		t.Fatalf("hintSnapshot.Board = %+v, want %+v", hintSnapshot.Board, initialSnapshot.Board)
+	}
+}
+
+func TestGameSessionConcurrentSubmitHintAllowsOneSuccess(t *testing.T) {
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+	defer session.Stop()
+	go func() {
+		for range session.Snapshots() {
+		}
+	}()
+
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := session.SubmitHint(context.Background())
+			results <- err
+		}()
+	}
+
+	var successCount int
+	var alreadyUsedCount int
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-results:
+			switch {
+			case err == nil:
+				successCount++
+			case errors.Is(err, ErrHintAlreadyUsed):
+				alreadyUsedCount++
+			default:
+				t.Fatalf("SubmitHint error = %v, want nil or %v", err, ErrHintAlreadyUsed)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for SubmitHint result")
+		}
+	}
+
+	if successCount != 1 {
+		t.Fatalf("successCount = %d, want 1", successCount)
+	}
+	if alreadyUsedCount != 1 {
+		t.Fatalf("alreadyUsedCount = %d, want 1", alreadyUsedCount)
+	}
+}
+
+func TestGameSessionSubmitMoveAfterHintScoresNormally(t *testing.T) {
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+	defer session.Stop()
+
+	hint, err := session.SubmitHint(context.Background())
+	if err != nil {
+		t.Fatalf("SubmitHint returned unexpected error: %v", err)
+	}
+	hintSnapshot := <-session.Snapshots()
+	if hintSnapshot.Score != 0 {
+		t.Fatalf("hintSnapshot.Score = %d, want 0", hintSnapshot.Score)
+	}
+
+	if err := session.SubmitMove(context.Background(), hint); err != nil {
+		t.Fatalf("SubmitMove with hinted selection returned error: %v", err)
+	}
+	moveSnapshot := <-session.Snapshots()
+	if moveSnapshot.Score == 0 {
+		t.Fatal("moveSnapshot.Score = 0, want score after playing hinted selection")
+	}
+}
+
 func TestGameSessionStopCancelsLifecycle(t *testing.T) {
 	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
 	if err != nil {
@@ -779,6 +1020,18 @@ func TestGameSessionSubmitRemoveNumberAfterExpiryReturnsGameOver(t *testing.T) {
 	}
 }
 
+func TestGameSessionSubmitHintAfterExpiryReturnsGameOver(t *testing.T) {
+	session := &GameSession{
+		expiresAt: time.Now().Add(-time.Second),
+		done:      make(chan struct{}),
+		closing:   make(chan struct{}),
+	}
+
+	if _, err := session.SubmitHint(context.Background()); err != ErrGameOver {
+		t.Fatalf("SubmitHint error = %v, want %v", err, ErrGameOver)
+	}
+}
+
 func TestGameSessionSubmitMoveAfterStopReturnsSessionClosed(t *testing.T) {
 	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
 	if err != nil {
@@ -818,6 +1071,20 @@ func TestGameSessionSubmitRemoveNumberAfterStopReturnsSessionClosed(t *testing.T
 
 	if err := session.SubmitRemoveNumber(context.Background(), Position{}); err != ErrSessionClosed {
 		t.Fatalf("SubmitRemoveNumber error = %v, want %v", err, ErrSessionClosed)
+	}
+}
+
+func TestGameSessionSubmitHintAfterStopReturnsSessionClosed(t *testing.T) {
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+
+	session.Stop()
+	<-session.Done()
+
+	if _, err := session.SubmitHint(context.Background()); err != ErrSessionClosed {
+		t.Fatalf("SubmitHint error = %v, want %v", err, ErrSessionClosed)
 	}
 }
 
@@ -875,6 +1142,15 @@ func TestGameSessionConcurrentSubmitActionsAndStopDoesNotPanic(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			_ = session.SubmitRemoveNumber(ctx, Position{Row: 99, Col: 99})
+		}()
+	}
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_, _ = session.SubmitHint(ctx)
 		}()
 	}
 
