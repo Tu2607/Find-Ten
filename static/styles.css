@@ -170,6 +170,7 @@ button {
   font-size: 20px;
   font-weight: 700;
   line-height: 1;
+  transition: opacity 0.15s ease-out;
 }
 
 .cell:hover:not(:disabled) {
@@ -179,6 +180,11 @@ button {
 .cell.cleared {
   background: #eef1f5;
   color: transparent;
+}
+
+.cell.clearing {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 .cell.selected {

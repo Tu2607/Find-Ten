@@ -16,6 +16,10 @@ const state = {
   hintSnapshotPending: false,
   selectedStart: null,
   hoverCell: null,
+  optimisticMove: null,
+  cellRefs: [],
+  lastBoardSize: 0,
+  lastBoardWidth: 0,
   expiresAt: null,
   eventSource: null,
   countdownTimer: null
@@ -85,6 +89,10 @@ async function startGame(size) {
   state.hintPending = false;
   state.hintHighlight = null;
   state.hintSnapshotPending = false;
+  state.optimisticMove = null;
+  state.cellRefs = [];
+  state.lastBoardSize = 0;
+  state.lastBoardWidth = 0;
 
   applySnapshot(game.initialSnapshot);
   openSnapshots(game.gameId);
@@ -116,6 +124,16 @@ function openSnapshots(gameId) {
 }
 
 function applySnapshot(snapshot) {
+  let optimisticConfirmed = false;
+  if (state.optimisticMove) {
+    optimisticConfirmed = snapshot.gameOver ||
+      snapshot.validMoveCount === 0 ||
+      state.optimisticMove.affectedCells.every(({ row, col }) => {
+        const rowValues = snapshot.board[row];
+        return rowValues && rowValues[col] === 0;
+      });
+  }
+
   state.board = snapshot.board;
   state.score = snapshot.score;
   state.gameOver = snapshot.gameOver;
@@ -137,12 +155,15 @@ function applySnapshot(snapshot) {
   state.hoverCell = null;
 
   if (snapshot.gameOver || snapshot.validMoveCount === 0) {
+    state.optimisticMove = null;
     state.gameOver = true;
     stopCountdown();
     timeEl.textContent = "0s";
+  } else if (optimisticConfirmed) {
+    state.optimisticMove = null;
   }
 
-  scoreEl.textContent = state.score;
+  updateScoreDisplay();
   gameEl.textContent = state.gameOver ? gameOverText(state.gameOverReason) : "Playing";
   updateSkillButtons();
   maybeShowGameOver(snapshot);
@@ -166,34 +187,80 @@ function maybeShowGameOver(snapshot) {
 }
 
 function renderBoard() {
-  boardEl.innerHTML = "";
   boardEl.classList.toggle("empty", state.board.length === 0);
   boardEl.style.setProperty("--size", state.board.length || 9);
 
+  const boardWidth = currentBoardWidth();
+  const needsFullBuild = state.cellRefs.length === 0 ||
+    state.board.length !== state.lastBoardSize ||
+    boardWidth !== state.lastBoardWidth ||
+    boardWidth !== currentCellRefWidth();
+  if (needsFullBuild) {
+    boardEl.innerHTML = "";
+    state.cellRefs = [];
+
+    state.board.forEach((row, rowIndex) => {
+      state.cellRefs[rowIndex] = [];
+      row.forEach((_, colIndex) => {
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.dataset.row = rowIndex;
+        cell.dataset.col = colIndex;
+        cell.addEventListener("click", () => handleCellClick(rowIndex, colIndex));
+        cell.addEventListener("mouseenter", () => handleCellHover(rowIndex, colIndex));
+        cell.addEventListener("focus", () => handleCellHover(rowIndex, colIndex));
+        state.cellRefs[rowIndex][colIndex] = cell;
+        boardEl.appendChild(cell);
+      });
+    });
+    state.lastBoardSize = state.board.length;
+    state.lastBoardWidth = boardWidth;
+  }
+
   state.board.forEach((row, rowIndex) => {
     row.forEach((value, colIndex) => {
-      const cell = document.createElement("button");
-      cell.type = "button";
-      cell.className = "cell";
-      cell.textContent = value === 0 ? "" : String(value);
-      cell.dataset.row = rowIndex;
-      cell.dataset.col = colIndex;
-      cell.disabled = state.gameOver;
-
-      if (value === 0) {
-        cell.classList.add("cleared");
+      const cell = state.cellRefs[rowIndex] && state.cellRefs[rowIndex][colIndex];
+      if (!cell) {
+        return;
       }
-      if (value !== 0 && state.hintHighlight && positionInsideSelection({ row: rowIndex, col: colIndex }, state.hintHighlight)) {
-        cell.classList.add("hint");
+      const text = value === 0 ? "" : String(value);
+      if (cell.textContent !== text) {
+        cell.textContent = text;
       }
-      cell.addEventListener("click", () => handleCellClick(rowIndex, colIndex));
-      cell.addEventListener("mouseenter", () => handleCellHover(rowIndex, colIndex));
-      cell.addEventListener("focus", () => handleCellHover(rowIndex, colIndex));
-      boardEl.appendChild(cell);
+      updateCellClasses(cell, rowIndex, colIndex, value);
+      if (cell.disabled !== state.gameOver) {
+        cell.disabled = state.gameOver;
+      }
     });
   });
 
   updateSelectionPreview();
+}
+
+function updateCellClasses(cell, row, col, value) {
+  const classes = ["cell"];
+  if (value === 0) {
+    classes.push("cleared");
+  }
+  if (value !== 0 && state.hintHighlight && positionInsideSelection({ row, col }, state.hintHighlight)) {
+    classes.push("hint");
+  }
+  if (isOptimisticallyClearing(row, col)) {
+    classes.push("clearing");
+  }
+
+  const nextClassName = classes.join(" ");
+  if (cell.className !== nextClassName) {
+    cell.className = nextClassName;
+  }
+}
+
+function currentBoardWidth() {
+  return state.board.length > 0 && state.board[0] ? state.board[0].length : 0;
+}
+
+function currentCellRefWidth() {
+  return state.cellRefs.length > 0 && state.cellRefs[0] ? state.cellRefs[0].length : 0;
 }
 
 async function submitReshuffle() {
@@ -230,6 +297,7 @@ async function submitReshuffle() {
   if (response.status === 409 || response.status === 410) {
     state.reshuffleUsed = true;
     if (response.status === 410) {
+      revertOptimisticMove();
       state.gameOver = true;
       gameEl.textContent = "Ended";
       renderBoard();
@@ -298,6 +366,7 @@ async function submitHint() {
   state.hintPending = false;
   if (response.status === 409 || response.status === 410) {
     if (response.status === 410) {
+      revertOptimisticMove();
       state.gameOver = true;
       state.hintHighlight = null;
       state.hintSnapshotPending = false;
@@ -355,6 +424,7 @@ async function handleCellClick(row, col) {
   state.selectedStart = null;
   state.hoverCell = null;
   updateSelectionPreview();
+  applyOptimisticMove(selection);
   await submitMove(selection);
 }
 
@@ -399,6 +469,7 @@ async function submitRemoveNumber(position) {
     state.removeNumberUsed = true;
     state.removeMode = false;
     if (response.status === 410) {
+      revertOptimisticMove();
       state.gameOver = true;
       gameEl.textContent = "Ended";
       renderBoard();
@@ -431,6 +502,7 @@ async function submitMove(selection) {
       body: JSON.stringify({ selection })
     });
   } catch {
+    revertOptimisticMove();
     setStatus("Could not submit move.");
     return;
   }
@@ -439,6 +511,8 @@ async function submitMove(selection) {
     setStatus("Move accepted.");
     return;
   }
+
+  revertOptimisticMove();
 
   if (response.status === 400) {
     setStatus("That rectangle does not make 10.");
@@ -457,9 +531,68 @@ async function submitMove(selection) {
   setStatus("Move failed.");
 }
 
+function applyOptimisticMove(selection) {
+  revertOptimisticMove();
+
+  const minRow = Math.min(selection.start.row, selection.end.row);
+  const maxRow = Math.max(selection.start.row, selection.end.row);
+  const minCol = Math.min(selection.start.col, selection.end.col);
+  const maxCol = Math.max(selection.start.col, selection.end.col);
+  const affectedCells = [];
+
+  for (let row = minRow; row <= maxRow; row += 1) {
+    for (let col = minCol; col <= maxCol; col += 1) {
+      if (state.board[row][col] !== 0) {
+        affectedCells.push({ row, col });
+      }
+    }
+  }
+
+  if (affectedCells.length === 0) {
+    return;
+  }
+
+  state.optimisticMove = {
+    affectedCells,
+    affectedCellKeys: new Set(affectedCells.map(cellKey)),
+    scoreAdded: affectedCells.length * 100
+  };
+
+  affectedCells.forEach(({ row, col }) => {
+    const cell = state.cellRefs[row] && state.cellRefs[row][col];
+    if (cell) {
+      cell.classList.add("clearing");
+    }
+  });
+  updateScoreDisplay();
+}
+
+function revertOptimisticMove() {
+  if (!state.optimisticMove) {
+    return;
+  }
+
+  state.optimisticMove.affectedCells.forEach(({ row, col }) => {
+    const cell = state.cellRefs[row] && state.cellRefs[row][col];
+    if (cell) {
+      cell.classList.remove("clearing");
+    }
+  });
+  state.optimisticMove = null;
+  updateScoreDisplay();
+}
+
+function isOptimisticallyClearing(row, col) {
+  return Boolean(state.optimisticMove && state.optimisticMove.affectedCellKeys.has(cellKey({ row, col })));
+}
+
+function updateScoreDisplay() {
+  const optimisticScore = state.optimisticMove ? state.optimisticMove.scoreAdded : 0;
+  scoreEl.textContent = state.score + optimisticScore;
+}
+
 function updateSelectionPreview() {
-  const cells = boardEl.querySelectorAll(".cell");
-  cells.forEach((cell) => cell.classList.remove("selected", "corner"));
+  forEachCellRef((cell) => cell.classList.remove("selected", "corner"));
 
   if (!state.selectedStart) {
     return;
@@ -472,7 +605,7 @@ function updateSelectionPreview() {
   const minCol = Math.min(start.col, end.col);
   const maxCol = Math.max(start.col, end.col);
 
-  cells.forEach((cell) => {
+  forEachCellRef((cell) => {
     const row = Number(cell.dataset.row);
     const col = Number(cell.dataset.col);
     if (row >= minRow && row <= maxRow && col >= minCol && col <= maxCol) {
@@ -485,6 +618,23 @@ function updateSelectionPreview() {
       cell.classList.add("corner");
     }
   });
+}
+
+function forEachCellRef(callback) {
+  state.cellRefs.forEach((row) => {
+    if (!row) {
+      return;
+    }
+    row.forEach((cell) => {
+      if (cell) {
+        callback(cell);
+      }
+    });
+  });
+}
+
+function cellKey(cell) {
+  return `${cell.row},${cell.col}`;
 }
 
 function positionInsideSelection(position, selection) {
@@ -515,6 +665,7 @@ function renderCountdown() {
   timeEl.textContent = `${remaining}s`;
 
   if (remaining === 0 && !state.gameOver) {
+    revertOptimisticMove();
     state.gameOver = true;
     state.gameOverReason = 2;
     state.gameOverPopupShown = true;
