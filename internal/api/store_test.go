@@ -10,7 +10,7 @@ import (
 
 func TestSessionStoreRemoveDeletesSession(t *testing.T) {
 	store := newSessionStore()
-	session, _, err := game.NewGameSession(context.Background(), 9)
+	session, _, err := game.NewGameSession(context.Background(), 9, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned error: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestSessionStoreRemoveDeletesSession(t *testing.T) {
 func TestSessionStoreAddPrunesCompletedSessions(t *testing.T) {
 	store := newSessionStore()
 
-	completed, _, err := game.NewGameSession(context.Background(), 9)
+	completed, _, err := game.NewGameSession(context.Background(), 9, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned error: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestSessionStoreAddPrunesCompletedSessions(t *testing.T) {
 	completed.Stop()
 	<-completed.Done()
 
-	active, _, err := game.NewGameSession(context.Background(), 9)
+	active, _, err := game.NewGameSession(context.Background(), 9, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned error: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestSessionStoreAddPrunesCompletedSessions(t *testing.T) {
 func TestSessionStoreAddKeepsActiveSessions(t *testing.T) {
 	store := newSessionStore()
 
-	active, _, err := game.NewGameSession(context.Background(), 9)
+	active, _, err := game.NewGameSession(context.Background(), 9, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned error: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestSessionStoreAddKeepsActiveSessions(t *testing.T) {
 		t.Fatalf("add active session returned error: %v", err)
 	}
 
-	another, _, err := game.NewGameSession(context.Background(), 9)
+	another, _, err := game.NewGameSession(context.Background(), 9, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned error: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestSessionStoreAddSucceedsWhenPruneFreesCapacity(t *testing.T) {
 	store := newSessionStore()
 	store.maxSessions = 1
 
-	completed, _, err := game.NewGameSession(context.Background(), 9)
+	completed, _, err := game.NewGameSession(context.Background(), 9, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned error: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestSessionStoreAddSucceedsWhenPruneFreesCapacity(t *testing.T) {
 	completed.Stop()
 	<-completed.Done()
 
-	replacement, _, err := game.NewGameSession(context.Background(), 9)
+	replacement, _, err := game.NewGameSession(context.Background(), 9, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned error: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestSessionStoreAddFailsWhenActiveSessionsReachCapacity(t *testing.T) {
 	store := newSessionStore()
 	store.maxSessions = 1
 
-	active, _, err := game.NewGameSession(context.Background(), 9)
+	active, _, err := game.NewGameSession(context.Background(), 9, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned error: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestSessionStoreAddFailsWhenActiveSessionsReachCapacity(t *testing.T) {
 		t.Fatalf("add active session returned error: %v", err)
 	}
 
-	extra, _, err := game.NewGameSession(context.Background(), 9)
+	extra, _, err := game.NewGameSession(context.Background(), 9, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned error: %v", err)
 	}

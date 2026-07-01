@@ -9,7 +9,6 @@ const (
 	minGeneratedDigit          = 1
 	maxGeneratedDigit          = 9
 	maxBoardGenerationAttempts = 1000
-	DefaultGameDurationSeconds = 120
 )
 
 func NewGame(size int) (*GameState, error) {

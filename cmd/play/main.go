@@ -23,7 +23,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	session, initialSnapshot, err := game.NewGameSession(ctx, *size)
+	session, initialSnapshot, err := game.NewGameSession(ctx, *size, game.DefaultDurationSeconds)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to start game: %v\n", err)
 		os.Exit(1)

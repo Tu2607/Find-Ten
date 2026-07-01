@@ -2,32 +2,43 @@
 
 ## Product Goal
 
-Build a Go backend-first clone of the AZX Service Time style puzzle minigame.
+Build a Go backend-first clone of the AZX Service Time style puzzle minigame, with the backend remaining authoritative for game rules and state transitions.
 
-The game should:
-- generate a grid of digits
-- let the player select rectangle regions whose values sum to exactly `10`
-- clear successful selections
-- track score
-- end when time expires or no valid moves remain
+The game:
+- generates a grid of digits
+- lets the player select rectangle regions whose values sum to exactly `10`
+- clears successful selections
+- tracks score
+- supports one-use helper skills
+- ends when time expires, no valid moves remain, or the board is fully cleared
 
-## MVP Scope
+## Current Implemented Scope
 
-The MVP focuses on backend game logic before WebUI work.
-
-Included:
+Implemented gameplay:
 - board sizes `9x9`, `10x10`, and `11x11`
 - rectangle selections
 - cleared cells represented as backend value `0`
-- valid move detection
+- valid move detection and cached valid move lists
 - scoring
 - timer/game-over behavior
-- CLI demo as the first manual testing surface
+- one-use reshuffle skill
+- one-use remove-number skill
+- one-use hint skill
+- configurable game durations of `60`, `120`, or `180` seconds
 
-Excluded for MVP:
-- WebUI
+Implemented delivery surfaces:
+- CLI play mode
+- HTTP API for game lifecycle and player actions
+- SSE snapshot stream for browser updates
+- browser WebUI with welcome, settings, game, and game-over screens
+- configurable board font in the WebUI
+- Dockerized server deployment
+
+Out of scope for the current game:
 - multiplayer
 - collapse/refill behavior
+- persisted accounts, scores, or settings
+- unlockable progression
 
 Permanently excluded:
 - arbitrary quadrilateral selection
@@ -54,19 +65,44 @@ Scoring is based on newly cleared cells:
 - each newly cleared non-zero cell is worth `100` points
 - already-cleared `0` cells do not score again
 
-The default game duration is `120` seconds.
+The player can choose a game duration of `60`, `120`, or `180` seconds. The default is `120` seconds.
 
 The game ends when:
 - the timer reaches `0`
 - or no valid moves remain
+- or all cells are cleared
+
+## Helper Skills
+
+Each game session has three one-use helper skills:
+
+- Reshuffle: replaces remaining non-zero cells while preserving the number of cleared cells and keeping the score unchanged.
+- Remove number: clears one selected non-zero cell without awarding score.
+- Hint: reveals one currently valid rectangle without changing the board or score.
+
+Rejected skill attempts do not consume the skill.
+
+## User Interfaces
+
+The project currently supports:
+
+- CLI play for manual terminal testing.
+- Browser play through the Go HTTP server.
+- Real-time browser updates through SSE snapshots.
+
+The browser settings screen supports:
+
+- board size selection: `9x9`, `10x10`, or `11x11`
+- timer selection: `60`, `120`, or `180` seconds
+- board font selection: Chalk, Clean, or Retro
 
 ## Future Direction
 
 Future work may add:
-- WebUI rendering and input
 - WebSocket transport
 - same-board multiplayer race mode
-- hints
 - replay validation
 - AI/bot move selection
 - difficulty analysis
+- persistent settings or score history
+- unlockable cosmetics or skills

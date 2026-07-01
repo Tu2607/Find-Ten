@@ -41,7 +41,16 @@ func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, initialSnapshot, err := game.NewGameSession(context.Background(), *request.Size)
+	durationSeconds := game.DefaultDurationSeconds
+	if request.Duration != nil {
+		durationSeconds = *request.Duration
+	}
+	if err := game.ValidateDuration(durationSeconds); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	session, initialSnapshot, err := game.NewGameSession(context.Background(), *request.Size, durationSeconds)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create game")
 		return

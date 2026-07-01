@@ -50,9 +50,8 @@ const gameOverScoreEl = document.getElementById("gameOverScore");
 // Screen navigation
 const playButtonEl = document.getElementById("playButton");
 playButtonEl.addEventListener("click", () => {
-  const size = getSelectedBoardSize();
   showScreen("game");
-  startGame(size);
+  startGame();
 });
 
 document.getElementById("settingsButton").addEventListener("click", () => {
@@ -66,8 +65,7 @@ document.getElementById("settingsBackButton").addEventListener("click", () => {
 const playAgainButtonEl = document.getElementById("playAgainButton");
 playAgainButtonEl.addEventListener("click", () => {
   hideGameOverOverlay();
-  const size = getSelectedBoardSize();
-  startGame(size);
+  startGame();
 });
 
 document.getElementById("mainMenuButton").addEventListener("click", () => {
@@ -81,8 +79,7 @@ document.getElementById("mainMenuButton").addEventListener("click", () => {
 });
 
 document.getElementById("restartButton").addEventListener("click", () => {
-  const size = getSelectedBoardSize();
-  startGame(size);
+  startGame();
 });
 
 document.getElementById("homeButton").addEventListener("click", () => {
@@ -149,6 +146,16 @@ function getSelectedBoardSize() {
   return checked ? Number(checked.value) : 9;
 }
 
+function getSelectedTimer() {
+  const checked = document.querySelector('input[name="timer"]:checked');
+  return checked ? Number(checked.value) : 120;
+}
+
+function getSelectedFont() {
+  const checked = document.querySelector('input[name="font"]:checked');
+  return checked ? checked.value : "chalk";
+}
+
 function showGameOverOverlay() {
   gameOverReasonEl.textContent = gameOverReasonText(state.gameOverReason);
   gameOverScoreEl.textContent = state.score;
@@ -159,7 +166,7 @@ function hideGameOverOverlay() {
   gameOverOverlay.hidden = true;
 }
 
-async function startGame(size) {
+async function startGame() {
   if (state.startPending) return;
   state.startPending = true;
   playButtonEl.disabled = true;
@@ -168,6 +175,9 @@ async function startGame(size) {
   try {
     const gen = ++state.startGeneration;
     const previousGameId = state.gameId;
+    const size = getSelectedBoardSize();
+    const duration = getSelectedTimer();
+    const font = getSelectedFont();
 
     closeStream();
     stopCountdown();
@@ -184,7 +194,7 @@ async function startGame(size) {
       response = await fetch("/games", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ size })
+        body: JSON.stringify({ size, duration })
       });
     } catch {
       if (gen !== state.startGeneration) return;
@@ -236,6 +246,9 @@ async function startGame(size) {
     state.cellRefs = [];
     state.lastBoardSize = 0;
     state.lastBoardWidth = 0;
+
+    boardEl.classList.remove("font-chalk", "font-clean", "font-retro");
+    boardEl.classList.add(`font-${font}`);
 
     applySnapshot(game.initialSnapshot);
     openSnapshots(game.gameId);

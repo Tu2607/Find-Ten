@@ -719,7 +719,7 @@ func TestRunGameRejectsHintProcessedAfterExpiry(t *testing.T) {
 }
 
 func TestNewGameSessionReturnsInitialSnapshot(t *testing.T) {
-	session, snapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, snapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -747,7 +747,7 @@ func TestNewGameSessionReturnsInitialSnapshot(t *testing.T) {
 
 func TestGameSessionExpiresAt(t *testing.T) {
 	before := time.Now()
-	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -755,16 +755,44 @@ func TestGameSessionExpiresAt(t *testing.T) {
 	after := time.Now()
 
 	expiresAt := session.ExpiresAt()
-	if expiresAt.Before(before.Add(DefaultGameDurationSeconds * time.Second)) {
-		t.Fatalf("ExpiresAt() = %v, want at or after %v", expiresAt, before.Add(DefaultGameDurationSeconds*time.Second))
+	if expiresAt.Before(before.Add(DefaultDurationSeconds * time.Second)) {
+		t.Fatalf("ExpiresAt() = %v, want at or after %v", expiresAt, before.Add(DefaultDurationSeconds*time.Second))
 	}
-	if expiresAt.After(after.Add(DefaultGameDurationSeconds * time.Second)) {
-		t.Fatalf("ExpiresAt() = %v, want at or before %v", expiresAt, after.Add(DefaultGameDurationSeconds*time.Second))
+	if expiresAt.After(after.Add(DefaultDurationSeconds * time.Second)) {
+		t.Fatalf("ExpiresAt() = %v, want at or before %v", expiresAt, after.Add(DefaultDurationSeconds*time.Second))
+	}
+}
+
+func TestNewGameSessionCustomDuration(t *testing.T) {
+	before := time.Now()
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, 60)
+	if err != nil {
+		t.Fatalf("NewGameSession returned unexpected error: %v", err)
+	}
+	after := time.Now()
+	defer session.Stop()
+
+	expiresAt := session.ExpiresAt()
+	if expiresAt.Before(before.Add(60 * time.Second)) {
+		t.Fatalf("ExpiresAt() = %v, want at or after %v", expiresAt, before.Add(60*time.Second))
+	}
+	if expiresAt.After(after.Add(60 * time.Second)) {
+		t.Fatalf("ExpiresAt() = %v, want at or before %v", expiresAt, after.Add(60*time.Second))
+	}
+}
+
+func TestNewGameSessionInvalidDuration(t *testing.T) {
+	for _, duration := range []int{0, 45, -1, 300} {
+		session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, duration)
+		if err == nil {
+			session.Stop()
+			t.Fatalf("NewGameSession with duration %d returned nil error, want validation error", duration)
+		}
 	}
 }
 
 func TestGameSessionSubmitMove(t *testing.T) {
-	session, initialSnapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, initialSnapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -786,7 +814,7 @@ func TestGameSessionSubmitMove(t *testing.T) {
 }
 
 func TestGameSessionSubmitMoveDoesNotWaitForRuntimeSnapshotReceiver(t *testing.T) {
-	session, initialSnapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, initialSnapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -815,7 +843,7 @@ func TestGameSessionSubmitMoveDoesNotWaitForRuntimeSnapshotReceiver(t *testing.T
 }
 
 func TestGameSessionSubmitReshuffle(t *testing.T) {
-	session, initialSnapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, initialSnapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -840,7 +868,7 @@ func TestGameSessionSubmitReshuffle(t *testing.T) {
 }
 
 func TestGameSessionSubmitRemoveNumber(t *testing.T) {
-	session, initialSnapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, initialSnapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -868,7 +896,7 @@ func TestGameSessionSubmitRemoveNumber(t *testing.T) {
 }
 
 func TestGameSessionSubmitHint(t *testing.T) {
-	session, initialSnapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, initialSnapshot, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -900,7 +928,7 @@ func TestGameSessionSubmitHint(t *testing.T) {
 }
 
 func TestGameSessionConcurrentSubmitHintAllowsOneSuccess(t *testing.T) {
-	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -945,7 +973,7 @@ func TestGameSessionConcurrentSubmitHintAllowsOneSuccess(t *testing.T) {
 }
 
 func TestGameSessionSubmitMoveAfterHintScoresNormally(t *testing.T) {
-	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -970,7 +998,7 @@ func TestGameSessionSubmitMoveAfterHintScoresNormally(t *testing.T) {
 }
 
 func TestGameSessionStopCancelsLifecycle(t *testing.T) {
-	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -1033,7 +1061,7 @@ func TestGameSessionSubmitHintAfterExpiryReturnsGameOver(t *testing.T) {
 }
 
 func TestGameSessionSubmitMoveAfterStopReturnsSessionClosed(t *testing.T) {
-	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -1047,7 +1075,7 @@ func TestGameSessionSubmitMoveAfterStopReturnsSessionClosed(t *testing.T) {
 }
 
 func TestGameSessionSubmitReshuffleAfterStopReturnsSessionClosed(t *testing.T) {
-	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -1061,7 +1089,7 @@ func TestGameSessionSubmitReshuffleAfterStopReturnsSessionClosed(t *testing.T) {
 }
 
 func TestGameSessionSubmitRemoveNumberAfterStopReturnsSessionClosed(t *testing.T) {
-	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -1075,7 +1103,7 @@ func TestGameSessionSubmitRemoveNumberAfterStopReturnsSessionClosed(t *testing.T
 }
 
 func TestGameSessionSubmitHintAfterStopReturnsSessionClosed(t *testing.T) {
-	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -1089,7 +1117,7 @@ func TestGameSessionSubmitHintAfterStopReturnsSessionClosed(t *testing.T) {
 }
 
 func TestGameSessionClosesActionChannelAfterStop(t *testing.T) {
-	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -1108,7 +1136,7 @@ func TestGameSessionClosesActionChannelAfterStop(t *testing.T) {
 }
 
 func TestGameSessionConcurrentSubmitActionsAndStopDoesNotPanic(t *testing.T) {
-	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -1165,7 +1193,7 @@ func TestGameSessionConcurrentSubmitActionsAndStopDoesNotPanic(t *testing.T) {
 }
 
 func TestGameSessionSnapshotsCloseWhenGameEnds(t *testing.T) {
-	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize)
+	session, _, err := NewGameSession(context.Background(), MinSupportedBoardSize, DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}

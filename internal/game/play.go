@@ -9,13 +9,17 @@ import (
 
 var ErrSessionClosed = errors.New("game session is closed")
 
-func NewGameSession(ctx context.Context, size int) (*GameSession, GameSnapshot, error) {
+func NewGameSession(ctx context.Context, size int, durationSeconds int) (*GameSession, GameSnapshot, error) {
+	if err := ValidateDuration(durationSeconds); err != nil {
+		return nil, GameSnapshot{}, err
+	}
+
 	state, err := NewGame(size)
 	if err != nil {
 		return nil, GameSnapshot{}, err
 	}
 
-	expiresAt := time.Now().Add(DefaultGameDurationSeconds * time.Second)
+	expiresAt := time.Now().Add(time.Duration(durationSeconds) * time.Second)
 	initialSnapshot := newGameSnapshot(state, 1)
 	sessionCtx, cancel := context.WithCancel(ctx)
 	session := &GameSession{

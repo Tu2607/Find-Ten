@@ -219,7 +219,7 @@ The API currently exposes:
 
 `POST /games` creates a new single-player game session.
 
-The request body supplies the board size. The handler validates the size through `internal/game`, calls `game.NewGameSession`, stores the session in the API registry, and returns:
+The request body supplies the board size and an optional game duration in seconds. The handler validates both fields through `internal/game`, calls `game.NewGameSession`, stores the session in the API registry, and returns:
 - generated game ID
 - initial snapshot
 - authoritative expiry deadline
@@ -360,9 +360,11 @@ The skill sets one selected non-zero cell to `0`, does not award score, rebuilds
 
 The static WebUI lives under `static/` and is served by the Go backend via `http.FileServer`.
 
-### Font: Google Fonts (Indie Flower)
+### Fonts: Google Fonts (Indie Flower, Press Start 2P)
 
-The UI loads Indie Flower from Google Fonts via a `<link>` tag. This is an intentional external dependency — the chalkboard theme relies on a handwriting-style font, and Google Fonts provides the simplest delivery with good caching. Self-hosting was considered but adds build complexity for a game that requires a network connection to play anyway (all game state lives on the server). The CSS declares local fallbacks (`Segoe Print`, `Bradley Hand`, `cursive`) for degraded rendering if the font fails to load.
+The UI loads Indie Flower and Press Start 2P from Google Fonts via a `<link>` tag. These are intentional external dependencies — the chalkboard theme relies on a handwriting-style font, and the retro option uses a pixel font. Google Fonts provides the simplest delivery with good caching. Self-hosting was considered but adds build complexity for a game that requires a network connection to play anyway (all game state lives on the server). The CSS declares local fallbacks for degraded rendering if fonts fail to load.
+
+The player can choose between three board cell fonts in the settings screen: Chalk (Indie Flower), Clean (system sans-serif), and Retro (Press Start 2P). Font selection is a frontend-only setting and does not affect the backend. The font class is applied to the board element and scoped to cell styles only — menus, labels, and overlays always use Indie Flower.
 
 ## CLI
 

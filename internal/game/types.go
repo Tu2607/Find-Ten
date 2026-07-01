@@ -10,7 +10,17 @@ import (
 const (
 	MinSupportedBoardSize = 9
 	MaxSupportedBoardSize = 11
+
+	MinDurationSeconds     = 60
+	DefaultDurationSeconds = 120
+	MaxDurationSeconds     = 180
 )
+
+var supportedDurations = map[int]struct{}{
+	60:  {},
+	120: {},
+	180: {},
+}
 
 type Board [][]int
 
@@ -93,6 +103,13 @@ type GameSession struct {
 
 func IsSupportedBoardSize(size int) bool {
 	return size >= MinSupportedBoardSize && size <= MaxSupportedBoardSize
+}
+
+func ValidateDuration(seconds int) error {
+	if _, ok := supportedDurations[seconds]; !ok {
+		return fmt.Errorf("unsupported duration %d: must be 60, 120, or 180", seconds)
+	}
+	return nil
 }
 
 func ValidateBoardSize(size int) error {

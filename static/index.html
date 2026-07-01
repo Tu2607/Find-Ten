@@ -6,7 +6,7 @@
   <title>Find Ten</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Indie+Flower&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Indie+Flower&family=Press+Start+2P&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -94,14 +94,34 @@
 
           <div class="settings-group">
             <h3 class="chalk-label">Font</h3>
-            <div class="chalk-box">Chalk (default)</div>
-            <p class="chalk-coming-soon">coming soon</p>
+            <label class="chalk-radio">
+              <input type="radio" name="font" value="chalk" checked>
+              <span class="font-preview font-preview--chalk">Chalk</span>
+            </label>
+            <label class="chalk-radio">
+              <input type="radio" name="font" value="clean">
+              <span class="font-preview font-preview--clean">Clean</span>
+            </label>
+            <label class="chalk-radio">
+              <input type="radio" name="font" value="retro">
+              <span class="font-preview font-preview--retro">Retro</span>
+            </label>
           </div>
 
           <div class="settings-group">
             <h3 class="chalk-label">Timer</h3>
-            <div class="chalk-box">120s (default)</div>
-            <p class="chalk-coming-soon">coming soon</p>
+            <label class="chalk-radio">
+              <input type="radio" name="timer" value="60">
+              <span>60s</span>
+            </label>
+            <label class="chalk-radio">
+              <input type="radio" name="timer" value="120" checked>
+              <span>120s</span>
+            </label>
+            <label class="chalk-radio">
+              <input type="radio" name="timer" value="180">
+              <span>180s</span>
+            </label>
           </div>
         </div>
 

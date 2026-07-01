@@ -83,7 +83,7 @@ func TestFormatTimeLeft(t *testing.T) {
 }
 
 func TestHandleInputLineSubmitsMoveThroughSession(t *testing.T) {
-	session, initialSnapshot, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize)
+	session, initialSnapshot, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestHandleInputLineSubmitsMoveThroughSession(t *testing.T) {
 }
 
 func TestHandleInputLineSubmitsReshuffleThroughSession(t *testing.T) {
-	session, initialSnapshot, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize)
+	session, initialSnapshot, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestHandleInputLineSubmitsReshuffleThroughSession(t *testing.T) {
 }
 
 func TestHandleInputLineAlreadyUsedReshuffleKeepsRunning(t *testing.T) {
-	session, _, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize)
+	session, _, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestHandleInputLineAlreadyUsedReshuffleKeepsRunning(t *testing.T) {
 }
 
 func TestRunPrintsInitialSnapshot(t *testing.T) {
-	session, initialSnapshot, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize)
+	session, initialSnapshot, err := game.NewGameSession(context.Background(), game.MinSupportedBoardSize, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("NewGameSession returned unexpected error: %v", err)
 	}

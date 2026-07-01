@@ -302,6 +302,16 @@ button {
   cursor: not-allowed;
 }
 
+/* Font previews in settings */
+.font-preview--clean {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.font-preview--retro {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.75em;
+}
+
 #settingsBackButton {
   margin-top: auto;
   align-self: center;
@@ -455,6 +465,16 @@ button {
 
 .cell:disabled {
   cursor: default;
+}
+
+/* Board cell font variants */
+.board.font-clean .cell {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.board.font-retro .cell {
+  font-family: 'Press Start 2P', monospace;
+  font-size: clamp(14px, 2vw, 24px);
 }
 
 /* ====== GAME OVER OVERLAY ====== */

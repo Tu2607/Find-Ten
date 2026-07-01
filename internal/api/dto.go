@@ -7,7 +7,8 @@ import (
 )
 
 type createGameRequest struct {
-	Size *int `json:"size"`
+	Size     *int `json:"size"`
+	Duration *int `json:"duration"`
 }
 
 type createGameResponse struct {

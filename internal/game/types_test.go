@@ -39,6 +39,32 @@ func TestValidateBoardSize(t *testing.T) {
 	}
 }
 
+func TestValidateDuration(t *testing.T) {
+	tests := []struct {
+		name    string
+		seconds int
+		wantErr bool
+	}{
+		{"valid 60", 60, false},
+		{"valid 120", 120, false},
+		{"valid 180", 180, false},
+		{"invalid 0", 0, true},
+		{"invalid 30", 30, true},
+		{"invalid 90", 90, true},
+		{"invalid 240", 240, true},
+		{"invalid negative", -1, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateDuration(tt.seconds)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateDuration(%d) error = %v, wantErr %v", tt.seconds, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestNormalizeSelection(t *testing.T) {
 	tests := []struct {
 		name      string

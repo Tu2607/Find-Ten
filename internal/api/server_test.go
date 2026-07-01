@@ -292,6 +292,10 @@ func TestCreateGameBadRequests(t *testing.T) {
 			name: "unsupported size",
 			body: `{"size":12}`,
 		},
+		{
+			name: "unsupported duration",
+			body: `{"size":9,"duration":45}`,
+		},
 	}
 
 	for _, test := range tests {
@@ -306,6 +310,53 @@ func TestCreateGameBadRequests(t *testing.T) {
 				t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
 			}
 		})
+	}
+}
+
+func TestCreateGameWithDuration(t *testing.T) {
+	server := NewServer().(*Server)
+
+	before := time.Now()
+	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(`{"size":9,"duration":60}`))
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	after := time.Now()
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusCreated)
+	}
+
+	var body createGameResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	stored, ok := server.store.get(body.GameID)
+	if !ok {
+		t.Fatalf("game %q not found in store", body.GameID)
+	}
+	defer stored.session.Stop()
+
+	expiresAt := stored.session.ExpiresAt()
+	expectedMin := before.Add(60 * time.Second)
+	expectedMax := after.Add(60 * time.Second)
+	if expiresAt.Before(expectedMin) {
+		t.Errorf("ExpiresAt = %v, want at or after %v", expiresAt, expectedMin)
+	}
+	if expiresAt.After(expectedMax) {
+		t.Errorf("ExpiresAt = %v, want at or before %v", expiresAt, expectedMax)
+	}
+}
+
+func TestCreateGameInvalidDuration(t *testing.T) {
+	server := NewServer()
+
+	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(`{"size":9,"duration":45}`))
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
 	}
 }
 
