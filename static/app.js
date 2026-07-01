@@ -470,9 +470,12 @@ async function submitReshuffle() {
 
   state.reshufflePending = false;
   if (response.status === 409 || response.status === 410) {
+    endGame();
+    return;
+  }
+  if (response.status === 422) {
     state.reshuffleUsed = true;
     updateSkillButtons();
-    if (response.status === 410) endGame();
     return;
   }
 
@@ -532,12 +535,14 @@ async function submitHint() {
 
   state.hintPending = false;
   if (response.status === 409 || response.status === 410) {
+    state.hintHighlight = null;
+    state.hintSnapshotPending = false;
+    endGame();
+    return;
+  }
+  if (response.status === 422) {
+    state.hintUsed = true;
     updateSkillButtons();
-    if (response.status === 410) {
-      state.hintHighlight = null;
-      state.hintSnapshotPending = false;
-      endGame();
-    }
     return;
   }
 
@@ -622,10 +627,13 @@ async function submitRemoveNumber(position) {
 
   state.removeNumberPending = false;
   if (response.status === 409 || response.status === 410) {
+    endGame();
+    return;
+  }
+  if (response.status === 422) {
     state.removeNumberUsed = true;
     state.removeMode = false;
     updateSkillButtons();
-    if (response.status === 410) endGame();
     return;
   }
 

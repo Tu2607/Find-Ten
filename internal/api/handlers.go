@@ -251,7 +251,7 @@ func writeMoveError(w http.ResponseWriter, err error) {
 	case errors.Is(err, game.ErrGameOver):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, game.ErrReshuffleAlreadyUsed), errors.Is(err, game.ErrRemoveNumberAlreadyUsed), errors.Is(err, game.ErrHintAlreadyUsed), errors.Is(err, game.ErrHintNoValidMoves):
-		writeError(w, http.StatusConflict, err.Error())
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, game.ErrSessionClosed):
 		writeError(w, http.StatusGone, err.Error())
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):

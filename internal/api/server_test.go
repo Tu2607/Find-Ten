@@ -585,7 +585,7 @@ func TestSubmitReshuffleUnknownGameReturnsNotFound(t *testing.T) {
 	}
 }
 
-func TestSubmitReshuffleAlreadyUsedReturnsConflict(t *testing.T) {
+func TestSubmitReshuffleAlreadyUsedReturnsUnprocessable(t *testing.T) {
 	server := NewServer().(*Server)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
@@ -596,8 +596,8 @@ func TestSubmitReshuffleAlreadyUsedReturnsConflict(t *testing.T) {
 	}
 
 	response = postReshuffleForTest(t, server, created.response.GameID)
-	if response.Code != http.StatusConflict {
-		t.Fatalf("second reshuffle status = %d, want %d", response.Code, http.StatusConflict)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("second reshuffle status = %d, want %d", response.Code, http.StatusUnprocessableEntity)
 	}
 }
 
@@ -782,7 +782,7 @@ func TestSubmitRemoveNumberInvalidTargetDoesNotConsumeSkill(t *testing.T) {
 	}
 }
 
-func TestSubmitRemoveNumberAlreadyUsedReturnsConflict(t *testing.T) {
+func TestSubmitRemoveNumberAlreadyUsedReturnsUnprocessable(t *testing.T) {
 	server := NewServer().(*Server)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
@@ -801,8 +801,8 @@ func TestSubmitRemoveNumberAlreadyUsedReturnsConflict(t *testing.T) {
 		t.Fatal("firstNonZeroPositionExcluding returned false, want another removable number")
 	}
 	response = postRemoveNumberForTest(t, server, created.response.GameID, nextPosition)
-	if response.Code != http.StatusConflict {
-		t.Fatalf("second remove-number status = %d, want %d", response.Code, http.StatusConflict)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("second remove-number status = %d, want %d", response.Code, http.StatusUnprocessableEntity)
 	}
 }
 
@@ -895,7 +895,7 @@ func TestSubmitHintUnknownGameReturnsNotFound(t *testing.T) {
 	}
 }
 
-func TestSubmitHintAlreadyUsedReturnsConflict(t *testing.T) {
+func TestSubmitHintAlreadyUsedReturnsUnprocessable(t *testing.T) {
 	server := NewServer().(*Server)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
@@ -906,8 +906,8 @@ func TestSubmitHintAlreadyUsedReturnsConflict(t *testing.T) {
 	}
 
 	response = postHintForTest(t, server, created.response.GameID)
-	if response.Code != http.StatusConflict {
-		t.Fatalf("second hint status = %d, want %d", response.Code, http.StatusConflict)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("second hint status = %d, want %d", response.Code, http.StatusUnprocessableEntity)
 	}
 }
 

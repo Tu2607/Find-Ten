@@ -212,6 +212,7 @@ The API currently exposes:
 - `GET /games/{id}/snapshots`
 - `POST /games/{id}/moves`
 - `POST /games/{id}/reshuffle`
+- `POST /games/{id}/hint`
 - `POST /games/{id}/remove-number`
 
 ### Create Game
@@ -299,6 +300,42 @@ Move responses do not include snapshots. Updated board state is delivered throug
 
 Invalid moves and out-of-bounds selections return `400 Bad Request` and do not end the game. This matches the CLI flow and core game rules. Game-over move submissions return `409 Conflict`; closed sessions return `410 Gone`.
 
+### Reshuffle Submission
+
+`POST /games/{id}/reshuffle` triggers the once-per-session reshuffle skill.
+
+The request has no body. The handler calls:
+
+```go
+stored.session.SubmitReshuffle(r.Context())
+```
+
+Successful reshuffle responses are acknowledgements only:
+
+```json
+{ "accepted": true }
+```
+
+The response does not include a snapshot. The reshuffled board state is delivered through the SSE snapshot stream. Already-used submissions return `422 Unprocessable Entity`; game-over submissions return `409 Conflict`; closed sessions return `410 Gone`.
+
+### Hint Submission
+
+`POST /games/{id}/hint` triggers the once-per-session hint skill.
+
+The request has no body. The handler calls:
+
+```go
+stored.session.SubmitHint(r.Context())
+```
+
+Unlike other skill endpoints, the hint response returns the suggested selection directly in the response body rather than relying solely on the SSE snapshot stream. The client needs the selection coordinates immediately to highlight the hint on the board:
+
+```json
+{ "selection": { "start": { "row": 0, "col": 1 }, "end": { "row": 0, "col": 2 } } }
+```
+
+The SSE snapshot stream still delivers an updated snapshot with `hintUsed: true`, but the selection itself is only available in this response. Already-used submissions and no-valid-moves conditions return `422 Unprocessable Entity`; game-over submissions return `409 Conflict`; closed sessions return `410 Gone`.
+
 ### Remove-Number Submission
 
 `POST /games/{id}/remove-number` submits one cell position for the once-per-session remove-number skill.
@@ -317,7 +354,7 @@ Successful remove-number responses are acknowledgements only:
 
 The response does not include a snapshot. Updated board state is delivered through the SSE snapshot stream.
 
-The skill sets one selected non-zero cell to `0`, does not award score, rebuilds valid moves, and can be used only once per session. Rejected attempts do not consume the remaining skill use. Out-of-bounds positions and already-cleared target cells return `400 Bad Request`; already-used and game-over submissions return `409 Conflict`; closed sessions return `410 Gone`.
+The skill sets one selected non-zero cell to `0`, does not award score, rebuilds valid moves, and can be used only once per session. Rejected attempts do not consume the remaining skill use. Out-of-bounds positions and already-cleared target cells return `400 Bad Request`; already-used submissions return `422 Unprocessable Entity`; game-over submissions return `409 Conflict`; closed sessions return `410 Gone`.
 
 ## Frontend
 
