@@ -1,105 +1,59 @@
 # Find Ten Game
 
-Find Ten Game is a Go backend-first puzzle game inspired by the AZX Service Time style minigame I came across.
+A Go backend-first puzzle game inspired by the AZX Service Time style minigame.
 
-The player works on a grid of digits and selects rectangle regions that sum to exactly `10`. Valid selections clear those cells to `0`, score points, and update the set of remaining valid moves.
+The player works on a grid of digits and selects rectangle regions that sum to exactly `10`. Valid selections clear those cells to `0`, score points, and update the set of remaining valid moves. The game ends when the timer runs out or no valid moves remain.
 
-At its heart, this project is a learning project for:
-- Go game-state modeling
-- validation and cache design
-- actor-style game session runtime
-- HTTP API and SSE snapshot streaming
-- browser UI integration without duplicating backend rules
+## Features
 
-## Current State
+- **Board sizes:** `9x9`, `10x10`, `11x11`
+- **Core gameplay:** rectangle selection, prefix-sum validation, scoring (100 points per newly cleared cell)
+- **Skills:** one-use reshuffle, remove a single number, and hint (reveals a valid move)
+- **Timer:** 120-second countdown per game
+- **Two play modes:** CLI and browser-based WebUI
+- **Real-time updates:** SSE snapshot streaming to the browser
+- **Session cap:** configurable max concurrent game sessions
+- **Dockerized:** multi-stage Dockerfile for easy deployment
 
-MVP implemented so far:
-- core board, position, selection, and game state types
-- supported board sizes: `9x9`, `10x10`, `11x11`
-- random board generation with at least one valid move
-- prefix-sum rectangle lookup
-- valid move cache
-- move application, scoring, and game-over detection
-- deadline-based timer behavior
-- single-game `GameSession` runtime wrapper
-- CLI demo over the same session/runtime path
-- HTTP API server
-- in-memory game session registry
-- SSE runtime snapshot streaming
-- browser-based static WebUI
+## Run
 
-Still future work:
-- frontend polish and UX iteration
-- optional React migration
-- session cleanup policy
-- multiplayer experiments
-- hints, replay validation, and bot/difficulty analysis
-
-## Run CLI
-
-```sh
-go run ./cmd/play -size 9
-```
-
-Enter moves as zero-based rectangle coordinates:
-
-```text
-row1 col1 row2 col2
-```
-
-Example:
-
-```text
-0 0 0 2
-```
-
-Quit with:
-
-```text
-q
-```
-
-## Run WebUI
-
-Run from the repository root because the server currently serves static files from `./static`:
+### WebUI (server)
 
 ```sh
 go run ./cmd/server
 ```
 
-Open:
+Then open `http://127.0.0.1:8080/`. The server serves static files from `./static`, so run from the repository root.
 
-```text
-http://127.0.0.1:8080/
+Use `-addr` to change the listen address (default `:8080`).
+
+### CLI
+
+```sh
+go run ./cmd/play -size 9
 ```
 
-The WebUI can:
-- start a `9x9`, `10x10`, or `11x11` game
-- render the initial board
-- submit rectangle moves by clicking two cells
-- receive board updates through SSE
-- show score, valid move count, countdown, and game-over state
+Enter moves as zero-based rectangle coordinates (`row1 col1 row2 col2`). Type `q` to quit.
+
+### Docker
+
+```sh
+docker build -t find-ten .
+docker run -p 8080:8080 find-ten
+```
 
 ## HTTP API
 
-The server exposes:
-
-- `GET /health`
-- `POST /games`
-- `DELETE /games/{id}`
-- `GET /games/{id}/snapshots`
-- `POST /games/{id}/moves`
-- `POST /games/{id}/reshuffle`
-
-`POST /games` creates a game and returns the initial snapshot plus `expiresAt`.
-
-`DELETE /games/{id}` abandons a game session and removes its ID from the in-memory store.
-
-`GET /games/{id}/snapshots` opens an SSE stream for runtime snapshots after successful moves.
-
-`POST /games/{id}/moves` submits a rectangle selection. Move responses are acknowledgements only; updated board state arrives through SSE.
-
-`POST /games/{id}/reshuffle` uses the once-per-session reshuffle skill. Responses are acknowledgements only; updated board state arrives through SSE.
+| Method   | Path                          | Description                                      |
+|----------|-------------------------------|--------------------------------------------------|
+| `GET`    | `/health`                     | Health check                                     |
+| `POST`   | `/games`                      | Create a game; returns initial snapshot           |
+| `DELETE` | `/games/{id}`                 | Abandon and remove a game session                |
+| `GET`    | `/games/{id}/snapshots`       | SSE stream of runtime snapshots                  |
+| `POST`   | `/games/{id}/moves`           | Submit a rectangle move (ack only; state via SSE) |
+| `POST`   | `/games/{id}/reshuffle`       | Use the one-time reshuffle skill                  |
+| `POST`   | `/games/{id}/remove-number`   | Remove a single number from the board             |
+| `POST`   | `/games/{id}/hint`            | Get a hint (reveals one valid move)               |
 
 ## Test
 
@@ -109,6 +63,6 @@ go test ./...
 
 ## Project Docs
 
-- `docs/GOAL.md`: product intent and gameplay scope
-- `docs/ARCHITECTURE.md`: architecture decisions
-- `docs/plans/`: stepwise implementation roadmap
+- `docs/GOAL.md` — product intent and gameplay scope
+- `docs/ARCHITECTURE.md` — architecture decisions
+- `docs/plans/` — stepwise implementation roadmap

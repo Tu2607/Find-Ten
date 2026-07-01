@@ -22,82 +22,229 @@ const state = {
   lastBoardWidth: 0,
   expiresAt: null,
   eventSource: null,
-  countdownTimer: null
+  reconnectTimer: null,
+  countdownTimer: null,
+  startPending: false,
+  startGeneration: 0,
+  errorTimer: null
 };
 
+// Screen elements
+const welcomeScreen = document.getElementById("welcomeScreen");
+const settingsScreen = document.getElementById("settingsScreen");
+const gameScreen = document.getElementById("gameScreen");
+
+// Game elements
 const boardEl = document.getElementById("board");
 const scoreEl = document.getElementById("scoreValue");
 const timeEl = document.getElementById("timeValue");
-const gameEl = document.getElementById("gameValue");
-const statusEl = document.getElementById("statusText");
 const reshuffleButtonEl = document.getElementById("reshuffleButton");
 const removeNumberButtonEl = document.getElementById("removeNumberButton");
 const hintButtonEl = document.getElementById("hintButton");
 
-document.getElementById("startForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  await startGame(Number(document.getElementById("boardSize").value));
+// Game over overlay elements
+const gameOverOverlay = document.getElementById("gameOverOverlay");
+const gameOverReasonEl = document.getElementById("gameOverReason");
+const gameOverScoreEl = document.getElementById("gameOverScore");
+
+// Screen navigation
+const playButtonEl = document.getElementById("playButton");
+playButtonEl.addEventListener("click", () => {
+  const size = getSelectedBoardSize();
+  showScreen("game");
+  startGame(size);
+});
+
+document.getElementById("settingsButton").addEventListener("click", () => {
+  showScreen("settings");
+});
+
+document.getElementById("settingsBackButton").addEventListener("click", () => {
+  showScreen("welcome");
+});
+
+const playAgainButtonEl = document.getElementById("playAgainButton");
+playAgainButtonEl.addEventListener("click", () => {
+  hideGameOverOverlay();
+  const size = getSelectedBoardSize();
+  startGame(size);
+});
+
+document.getElementById("mainMenuButton").addEventListener("click", () => {
+  state.startGeneration++;
+  hideGameOverOverlay();
+  closeStream();
+  stopCountdown();
+  if (state.gameId) abandonGame(state.gameId);
+  state.gameId = null;
+  showScreen("welcome");
+});
+
+document.getElementById("restartButton").addEventListener("click", () => {
+  const size = getSelectedBoardSize();
+  startGame(size);
+});
+
+document.getElementById("homeButton").addEventListener("click", () => {
+  state.startGeneration++;
+  closeStream();
+  stopCountdown();
+  if (state.gameId) abandonGame(state.gameId);
+  state.gameId = null;
+  showScreen("welcome");
 });
 
 reshuffleButtonEl.addEventListener("click", submitReshuffle);
 removeNumberButtonEl.addEventListener("click", enableRemoveMode);
 hintButtonEl.addEventListener("click", submitHint);
 
+// Scatter chalk formulas randomly across the welcome chalkboard
+(function scatterFormulas() {
+  const formulas = [
+    "y = ax + b", "A = πr²", "a² + b² = c²", "C = 2πr",
+    "E = mc²", "V = lwh", "f(x) = x²", "d = rt",
+    "Σ = n(n+1)/2", "sin²θ + cos²θ = 1",
+    "log(ab) = log a + log b", "tanθ = sinθ/cosθ",
+    "x = (-b ± √(b²-4ac)) / 2a", "∫ x dx = x²/2 + C",
+    "n! = n × (n-1)!", "KE = ½mv²", "F = ma", "PV = nRT",
+    "P(A∪B) = P(A) + P(B)", "Δy / Δx"
+  ];
+  const container = document.getElementById("chalkFormulas");
+  if (!container) return;
+  const placed = [];
+
+  for (const text of formulas) {
+    const span = document.createElement("span");
+    span.textContent = text;
+    const rot = (Math.random() * 14 - 7).toFixed(1);
+    let top, left, tries = 0;
+    do {
+      top = Math.random() * 88 + 3;
+      left = Math.random() * 80 + 3;
+      tries++;
+    } while (tries < 40 && (isCenter(top, left) || tooClose(top, left, placed)));
+    placed.push({ top, left });
+    span.style.cssText = `top:${top.toFixed(1)}%;left:${left.toFixed(1)}%;transform:rotate(${rot}deg)`;
+    container.appendChild(span);
+  }
+
+  function isCenter(t, l) {
+    return t > 25 && t < 80 && l > 25 && l < 65;
+  }
+
+  function tooClose(t, l, list) {
+    return list.some(p => Math.abs(p.top - t) < 7 && Math.abs(p.left - l) < 12);
+  }
+})();
+
+function showScreen(name) {
+  hideError();
+  welcomeScreen.hidden = name !== "welcome";
+  settingsScreen.hidden = name !== "settings";
+  gameScreen.hidden = name !== "game";
+}
+
+function getSelectedBoardSize() {
+  const checked = document.querySelector('input[name="boardSize"]:checked');
+  return checked ? Number(checked.value) : 9;
+}
+
+function showGameOverOverlay() {
+  gameOverReasonEl.textContent = gameOverReasonText(state.gameOverReason);
+  gameOverScoreEl.textContent = state.score;
+  gameOverOverlay.hidden = false;
+}
+
+function hideGameOverOverlay() {
+  gameOverOverlay.hidden = true;
+}
+
 async function startGame(size) {
-  const previousGameId = state.gameId;
+  if (state.startPending) return;
+  state.startPending = true;
+  playButtonEl.disabled = true;
+  playAgainButtonEl.disabled = true;
 
-  closeStream();
-  stopCountdown();
-  setStatus("Starting game...");
-  gameEl.textContent = "Starting";
-
-  if (previousGameId) {
-    await abandonGame(previousGameId);
-  }
-
-  let response;
   try {
-    response = await fetch("/games", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ size })
-    });
-  } catch {
-    setStatus("Could not reach the server.");
-    gameEl.textContent = "Offline";
-    return;
+    const gen = ++state.startGeneration;
+    const previousGameId = state.gameId;
+
+    closeStream();
+    stopCountdown();
+    hideGameOverOverlay();
+
+    state.gameId = null;
+    if (previousGameId) {
+      await abandonGame(previousGameId);
+      if (gen !== state.startGeneration) return;
+    }
+
+    let response;
+    try {
+      response = await fetch("/games", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ size })
+      });
+    } catch {
+      if (gen !== state.startGeneration) return;
+      showScreen("welcome");
+      showError("Could not connect to the server.");
+      return;
+    }
+
+    if (gen !== state.startGeneration) return;
+
+    if (!response.ok) {
+      showScreen("welcome");
+      showError("Failed to start a new game.");
+      return;
+    }
+
+    let game;
+    try {
+      game = await response.json();
+    } catch {
+      if (gen !== state.startGeneration) return;
+      showScreen("welcome");
+      showError("Invalid response from server.");
+      return;
+    }
+
+    if (gen !== state.startGeneration) {
+      if (game && game.gameId) abandonGame(game.gameId);
+      return;
+    }
+
+    state.gameId = game.gameId;
+    state.expiresAt = new Date(game.expiresAt);
+    state.gameOver = false;
+    state.gameOverReason = 0;
+    state.selectedStart = null;
+    state.hoverCell = null;
+    state.gameOverPopupShown = false;
+    state.reshuffleUsed = false;
+    state.reshufflePending = false;
+    state.removeNumberUsed = false;
+    state.removeNumberPending = false;
+    state.removeMode = false;
+    state.hintUsed = false;
+    state.hintPending = false;
+    state.hintHighlight = null;
+    state.hintSnapshotPending = false;
+    state.optimisticMove = null;
+    state.cellRefs = [];
+    state.lastBoardSize = 0;
+    state.lastBoardWidth = 0;
+
+    applySnapshot(game.initialSnapshot);
+    openSnapshots(game.gameId);
+    startCountdown();
+  } finally {
+    state.startPending = false;
+    playButtonEl.disabled = false;
+    playAgainButtonEl.disabled = false;
   }
-
-  if (!response.ok) {
-    setStatus("Could not start game.");
-    gameEl.textContent = "Error";
-    return;
-  }
-
-  const game = await response.json();
-  state.gameId = game.gameId;
-  state.expiresAt = new Date(game.expiresAt);
-  state.selectedStart = null;
-  state.hoverCell = null;
-  state.gameOverPopupShown = false;
-  state.reshuffleUsed = false;
-  state.reshufflePending = false;
-  state.removeNumberUsed = false;
-  state.removeNumberPending = false;
-  state.removeMode = false;
-  state.hintUsed = false;
-  state.hintPending = false;
-  state.hintHighlight = null;
-  state.hintSnapshotPending = false;
-  state.optimisticMove = null;
-  state.cellRefs = [];
-  state.lastBoardSize = 0;
-  state.lastBoardWidth = 0;
-
-  applySnapshot(game.initialSnapshot);
-  openSnapshots(game.gameId);
-  startCountdown();
-  setStatus("Select two corners that sum to 10.");
 }
 
 async function abandonGame(gameId) {
@@ -106,21 +253,57 @@ async function abandonGame(gameId) {
       method: "DELETE"
     });
   } catch {
-    // Best effort only. Starting a new game should still be attempted.
+    // Best effort only.
   }
 }
 
 function openSnapshots(gameId) {
   state.eventSource = new EventSource(`/games/${gameId}/snapshots`);
   state.eventSource.addEventListener("snapshot", (event) => {
-    applySnapshot(JSON.parse(event.data));
-    setStatus("Board updated.");
+    if (state.gameId !== gameId) return;
+    let snapshot;
+    try { snapshot = JSON.parse(event.data); } catch { return; }
+    applySnapshot(snapshot);
   });
   state.eventSource.onerror = () => {
-    if (!state.gameOver) {
-      setStatus("Snapshot stream disconnected.");
-    }
+    if (state.gameOver || state.gameId !== gameId) return;
+    closeStream();
+    state.reconnectTimer = setTimeout(() => {
+      state.reconnectTimer = null;
+      if (!state.gameOver && state.gameId === gameId) {
+        openSnapshots(gameId);
+      }
+    }, 2000);
   };
+}
+
+function endGame(reason) {
+  revertOptimisticMove();
+  state.gameOver = true;
+  state.gameOverReason = reason || state.gameOverReason || 0;
+  closeStream();
+  stopCountdown();
+  updateSkillButtons();
+  renderBoard();
+  if (!state.gameOverPopupShown) {
+    state.gameOverPopupShown = true;
+    showGameOverOverlay();
+  }
+}
+
+function showError(message) {
+  const el = document.getElementById("errorToast");
+  el.textContent = message;
+  el.hidden = false;
+  clearTimeout(state.errorTimer);
+  state.errorTimer = setTimeout(() => { el.hidden = true; state.errorTimer = null; }, 4000);
+}
+
+function hideError() {
+  const el = document.getElementById("errorToast");
+  el.hidden = true;
+  clearTimeout(state.errorTimer);
+  state.errorTimer = null;
 }
 
 function applySnapshot(snapshot) {
@@ -164,7 +347,6 @@ function applySnapshot(snapshot) {
   }
 
   updateScoreDisplay();
-  gameEl.textContent = state.gameOver ? gameOverText(state.gameOverReason) : "Playing";
   updateSkillButtons();
   maybeShowGameOver(snapshot);
   renderBoard();
@@ -178,12 +360,7 @@ function maybeShowGameOver(snapshot) {
     return;
   }
 
-  const reason = snapshot.gameOverReason || 1;
-  state.gameOverPopupShown = true;
-  state.gameOver = true;
-  state.gameOverReason = reason;
-  gameEl.textContent = gameOverText(reason);
-  alert(`Game over: ${gameOverText(reason)}`);
+  endGame(snapshot.gameOverReason);
 }
 
 function renderBoard() {
@@ -274,7 +451,6 @@ async function submitReshuffle() {
   state.hoverCell = null;
   updateSelectionPreview();
   updateSkillButtons();
-  setStatus("Reshuffling board...");
 
   let response;
   try {
@@ -284,31 +460,24 @@ async function submitReshuffle() {
   } catch {
     state.reshufflePending = false;
     updateSkillButtons();
-    setStatus("Could not reshuffle.");
+    showError("Reshuffle failed — check your connection.");
     return;
   }
 
   if (response.ok) {
-    setStatus("Reshuffle accepted.");
     return;
   }
 
   state.reshufflePending = false;
   if (response.status === 409 || response.status === 410) {
     state.reshuffleUsed = true;
-    if (response.status === 410) {
-      revertOptimisticMove();
-      state.gameOver = true;
-      gameEl.textContent = "Ended";
-      renderBoard();
-    }
     updateSkillButtons();
-    setStatus(response.status === 409 ? "Reshuffle unavailable." : "Game ended.");
+    if (response.status === 410) endGame();
     return;
   }
 
+  if (response.status >= 500) showError("Server error — try again.");
   updateSkillButtons();
-  setStatus("Reshuffle failed.");
 }
 
 async function submitHint() {
@@ -322,7 +491,6 @@ async function submitHint() {
   state.hoverCell = null;
   updateSelectionPreview();
   updateSkillButtons();
-  setStatus("Finding hint...");
 
   let response;
   try {
@@ -332,7 +500,7 @@ async function submitHint() {
   } catch {
     state.hintPending = false;
     updateSkillButtons();
-    setStatus("Could not get hint.");
+    showError("Hint failed — check your connection.");
     return;
   }
 
@@ -343,13 +511,13 @@ async function submitHint() {
     } catch {
       state.hintPending = false;
       updateSkillButtons();
-      setStatus("Hint failed.");
+      showError("Hint failed — try again.");
       return;
     }
     if (!body.selection || !body.selection.start || !body.selection.end) {
       state.hintPending = false;
       updateSkillButtons();
-      setStatus("Hint failed.");
+      showError("Hint failed — try again.");
       return;
     }
     const hintSnapshotAlreadyReceived = state.hintUsed;
@@ -359,28 +527,22 @@ async function submitHint() {
     state.hintPending = false;
     updateSkillButtons();
     renderBoard();
-    setStatus("Hint shown.");
     return;
   }
 
   state.hintPending = false;
   if (response.status === 409 || response.status === 410) {
+    updateSkillButtons();
     if (response.status === 410) {
-      revertOptimisticMove();
-      state.gameOver = true;
       state.hintHighlight = null;
       state.hintSnapshotPending = false;
-      gameEl.textContent = "Ended";
-      stopCountdown();
-      renderBoard();
+      endGame();
     }
-    updateSkillButtons();
-    setStatus(response.status === 409 ? "Hint unavailable." : "Game ended.");
     return;
   }
 
+  if (response.status >= 500) showError("Server error — try again.");
   updateSkillButtons();
-  setStatus("Hint failed.");
 }
 
 function enableRemoveMode() {
@@ -390,7 +552,6 @@ function enableRemoveMode() {
   if (state.removeMode) {
     state.removeMode = false;
     updateSkillButtons();
-    setStatus("Remove canceled.");
     return;
   }
 
@@ -399,7 +560,6 @@ function enableRemoveMode() {
   state.hoverCell = null;
   updateSelectionPreview();
   updateSkillButtons();
-  setStatus("Choose a number to remove.");
 }
 
 async function handleCellClick(row, col) {
@@ -416,7 +576,6 @@ async function handleCellClick(row, col) {
     state.selectedStart = { row, col };
     state.hoverCell = { row, col };
     updateSelectionPreview();
-    setStatus("Choose the opposite corner.");
     return;
   }
 
@@ -433,7 +592,6 @@ async function submitRemoveNumber(position) {
     return;
   }
   if (state.board[position.row][position.col] === 0) {
-    setStatus("Choose a number that has not been cleared.");
     return;
   }
 
@@ -442,7 +600,6 @@ async function submitRemoveNumber(position) {
   state.hoverCell = null;
   updateSelectionPreview();
   updateSkillButtons();
-  setStatus("Removing number...");
 
   let response;
   try {
@@ -455,12 +612,11 @@ async function submitRemoveNumber(position) {
     state.removeNumberPending = false;
     state.removeMode = false;
     updateSkillButtons();
-    setStatus("Could not remove number.");
+    showError("Remove failed — check your connection.");
     return;
   }
 
   if (response.ok) {
-    setStatus("Remove accepted.");
     return;
   }
 
@@ -468,20 +624,14 @@ async function submitRemoveNumber(position) {
   if (response.status === 409 || response.status === 410) {
     state.removeNumberUsed = true;
     state.removeMode = false;
-    if (response.status === 410) {
-      revertOptimisticMove();
-      state.gameOver = true;
-      gameEl.textContent = "Ended";
-      renderBoard();
-    }
     updateSkillButtons();
-    setStatus(response.status === 409 ? "Remove unavailable." : "Game ended.");
+    if (response.status === 410) endGame();
     return;
   }
 
+  if (response.status >= 500) showError("Server error — try again.");
   state.removeMode = false;
   updateSkillButtons();
-  setStatus(response.status === 400 ? "Cannot remove that cell." : "Remove failed.");
 }
 
 function handleCellHover(row, col) {
@@ -503,32 +653,22 @@ async function submitMove(selection) {
     });
   } catch {
     revertOptimisticMove();
-    setStatus("Could not submit move.");
+    showError("Move failed — check your connection.");
     return;
   }
 
   if (response.ok) {
-    setStatus("Move accepted.");
     return;
   }
 
   revertOptimisticMove();
 
-  if (response.status === 400) {
-    setStatus("That rectangle does not make 10.");
-    return;
-  }
-
   if (response.status === 409 || response.status === 410) {
-    state.gameOver = true;
-    gameEl.textContent = "Ended";
-    setStatus("Game ended.");
-    updateSkillButtons();
-    renderBoard();
+    endGame();
     return;
   }
 
-  setStatus("Move failed.");
+  if (response.status >= 500) showError("Server error — try again.");
 }
 
 function applyOptimisticMove(selection) {
@@ -665,15 +805,7 @@ function renderCountdown() {
   timeEl.textContent = `${remaining}s`;
 
   if (remaining === 0 && !state.gameOver) {
-    revertOptimisticMove();
-    state.gameOver = true;
-    state.gameOverReason = 2;
-    state.gameOverPopupShown = true;
-    gameEl.textContent = "Expired";
-    setStatus("Time expired.");
-    updateSkillButtons();
-    renderBoard();
-    alert("Game over: Expired");
+    endGame(2);
   }
 }
 
@@ -685,14 +817,14 @@ function stopCountdown() {
 }
 
 function closeStream() {
+  if (state.reconnectTimer) {
+    clearTimeout(state.reconnectTimer);
+    state.reconnectTimer = null;
+  }
   if (state.eventSource) {
     state.eventSource.close();
   }
   state.eventSource = null;
-}
-
-function setStatus(message) {
-  statusEl.textContent = message;
 }
 
 function updateSkillButtons() {
@@ -753,15 +885,15 @@ function updateHintButton() {
   hintButtonEl.textContent = "Hint";
 }
 
-function gameOverText(reason) {
+function gameOverReasonText(reason) {
   switch (reason) {
     case 1:
-      return "No moves";
+      return "No Moves Left!";
     case 2:
-      return "Expired";
+      return "Time's Up!";
     case 3:
-      return "Cleared";
+      return "Board Cleared!";
     default:
-      return "Ended";
+      return "Game Over!";
   }
 }

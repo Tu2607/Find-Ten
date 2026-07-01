@@ -319,6 +319,14 @@ The response does not include a snapshot. Updated board state is delivered throu
 
 The skill sets one selected non-zero cell to `0`, does not award score, rebuilds valid moves, and can be used only once per session. Rejected attempts do not consume the remaining skill use. Out-of-bounds positions and already-cleared target cells return `400 Bad Request`; already-used and game-over submissions return `409 Conflict`; closed sessions return `410 Gone`.
 
+## Frontend
+
+The static WebUI lives under `static/` and is served by the Go backend via `http.FileServer`.
+
+### Font: Google Fonts (Indie Flower)
+
+The UI loads Indie Flower from Google Fonts via a `<link>` tag. This is an intentional external dependency — the chalkboard theme relies on a handwriting-style font, and Google Fonts provides the simplest delivery with good caching. Self-hosting was considered but adds build complexity for a game that requires a network connection to play anyway (all game state lives on the server). The CSS declares local fallbacks (`Segoe Print`, `Bradley Hand`, `cursive`) for degraded rendering if the font fails to load.
+
 ## CLI
 
 The CLI demo was the first manual testing surface and remains a thin client over `internal/game`.

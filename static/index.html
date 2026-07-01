@@ -4,59 +4,167 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Find Ten</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Indie+Flower&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <main class="shell">
-    <aside class="sidebar">
-      <header class="topbar">
-        <div>
-          <h1>Find Ten</h1>
-          <p id="statusText">Choose a board size to start.</p>
-        </div>
+  <!-- ====== WELCOME SCREEN ====== -->
+  <section id="welcomeScreen" class="screen screen--welcome">
+    <div class="chalkboard">
+      <div class="chalkboard__surface">
+        <div class="chalk-formulas" id="chalkFormulas" aria-hidden="true"></div>
+        <div class="spotlight"></div>
 
-        <form id="startForm" class="controls">
-          <label>
-            Size
-            <select id="boardSize">
-              <option value="9">9 x 9</option>
-              <option value="10">10 x 10</option>
-              <option value="11">11 x 11</option>
-            </select>
-          </label>
-          <button type="submit">Start</button>
-        </form>
-      </header>
+        <div class="welcome-content">
+          <div class="welcome-title" aria-label="Find Ten">
+            <svg class="title-arc" viewBox="0 0 700 200" aria-hidden="true">
+              <defs>
+                <path id="arc" d="M 60,180 Q 350,10 640,180" fill="none"/>
+                <filter id="chalkTitle" x="-5%" y="-5%" width="110%" height="110%">
+                  <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" result="noise"/>
+                  <feColorMatrix in="noise" type="saturate" values="0" result="grayNoise"/>
+                  <feComposite in="SourceGraphic" in2="grayNoise" operator="in" result="chalky"/>
+                  <feGaussianBlur in="chalky" stdDeviation="0.3"/>
+                </filter>
+              </defs>
+              <g filter="url(#chalkTitle)">
+                <text font-family="'Indie Flower', cursive" font-size="78" font-weight="900"
+                      letter-spacing="10" stroke="white" stroke-width="6" stroke-linejoin="round"
+                      fill="none" opacity="0.35">
+                  <textPath href="#arc" startOffset="50%" text-anchor="middle">FIND TEN</textPath>
+                </text>
+                <text font-family="'Indie Flower', cursive" font-size="78" font-weight="900"
+                      letter-spacing="10" fill="#ffe680">
+                  <textPath href="#arc" startOffset="50%" text-anchor="middle">FIND TEN</textPath>
+                </text>
+              </g>
+            </svg>
+          </div>
 
-      <section class="stats" aria-label="Game status">
-        <div>
-          <span>Score</span>
-          <strong id="scoreValue">0</strong>
+          <p class="easter-egg" aria-hidden="true">9 + 10 = 21</p>
+
+          <nav class="welcome-menu">
+            <button type="button" class="chalk-btn" id="playButton">Play</button>
+            <button type="button" class="chalk-btn" id="settingsButton">Settings</button>
+            <button type="button" class="chalk-btn" disabled>Leaderboard</button>
+          </nav>
+
         </div>
-        <div>
-          <span>Time</span>
-          <strong id="timeValue">--</strong>
-        </div>
-        <div>
-          <span>Status</span>
-          <strong id="gameValue">Idle</strong>
-        </div>
-        <div class="skill">
-          <span>Skill</span>
-          <div class="skill-actions">
-            <button id="reshuffleButton" type="button" disabled>Reshuffle</button>
-            <button id="removeNumberButton" type="button" disabled>Remove</button>
-            <button id="hintButton" type="button" disabled>Hint</button>
+      </div>
+      <div class="chalk-tray" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <!-- ====== SETTINGS SCREEN ====== -->
+  <section id="settingsScreen" class="screen screen--settings" hidden>
+    <div class="chalkboard">
+      <div class="chalkboard__surface">
+        <h2 class="chalk-heading">Settings</h2>
+        <div class="chalk-underline"></div>
+
+        <div class="settings-grid">
+          <div class="settings-group">
+            <h3 class="chalk-label">Board Size</h3>
+            <label class="chalk-radio">
+              <input type="radio" name="boardSize" value="9" checked>
+              <span>9 × 9</span>
+            </label>
+            <label class="chalk-radio">
+              <input type="radio" name="boardSize" value="10">
+              <span>10 × 10</span>
+            </label>
+            <label class="chalk-radio">
+              <input type="radio" name="boardSize" value="11">
+              <span>11 × 11</span>
+            </label>
+          </div>
+
+          <div class="settings-group">
+            <h3 class="chalk-label">Background</h3>
+            <div class="color-swatches">
+              <button type="button" class="swatch swatch--green swatch--active" aria-label="Green"></button>
+              <button type="button" class="swatch swatch--blue" disabled aria-label="Blue"></button>
+              <button type="button" class="swatch swatch--red" disabled aria-label="Red"></button>
+              <button type="button" class="swatch swatch--purple" disabled aria-label="Purple"></button>
+            </div>
+            <p class="chalk-coming-soon">coming soon</p>
+          </div>
+
+          <div class="settings-group">
+            <h3 class="chalk-label">Font</h3>
+            <div class="chalk-box">Chalk (default)</div>
+            <p class="chalk-coming-soon">coming soon</p>
+          </div>
+
+          <div class="settings-group">
+            <h3 class="chalk-label">Timer</h3>
+            <div class="chalk-box">120s (default)</div>
+            <p class="chalk-coming-soon">coming soon</p>
           </div>
         </div>
-      </section>
-    </aside>
 
-    <section class="board-panel">
-      <div id="board" class="board empty" aria-label="Game board"></div>
-    </section>
-  </main>
+        <button type="button" class="chalk-btn" id="settingsBackButton">← Back</button>
+      </div>
+      <div class="chalk-tray" aria-hidden="true"></div>
+    </div>
+  </section>
 
+  <!-- ====== GAME SCREEN ====== -->
+  <section id="gameScreen" class="screen screen--game" hidden>
+    <div class="chalkboard">
+      <div class="chalkboard__surface">
+        <div class="game-topbar">
+          <div class="topbar-score">
+            <span class="topbar-label">Score</span>
+            <strong id="scoreValue">0</strong>
+          </div>
+          <div class="topbar-time">
+            <span class="topbar-label">Time</span>
+            <strong id="timeValue">--</strong>
+          </div>
+          <div class="topbar-skills">
+            <span class="topbar-label">Skills</span>
+            <div class="skill-actions">
+              <button id="reshuffleButton" class="chalk-btn chalk-btn--sm" type="button" disabled>Reshuffle</button>
+              <button id="removeNumberButton" class="chalk-btn chalk-btn--sm" type="button" disabled>Remove</button>
+              <button id="hintButton" class="chalk-btn chalk-btn--sm" type="button" disabled>Hint</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="chalk-divider"></div>
+
+        <section class="board-panel">
+          <div id="board" class="board empty" aria-label="Game board"></div>
+        </section>
+
+        <div class="game-nav">
+          <button type="button" class="chalk-btn chalk-btn--sm" id="restartButton">Restart</button>
+          <button type="button" class="chalk-btn chalk-btn--sm" id="homeButton">Home</button>
+        </div>
+      </div>
+      <div class="chalk-tray" aria-hidden="true"></div>
+    </div>
+
+    <!-- Game Over Overlay -->
+    <div id="gameOverOverlay" class="overlay" hidden>
+      <div class="overlay__scrim"></div>
+      <div class="overlay__popup">
+        <h2 class="overlay__reason" id="gameOverReason">Time's Up!</h2>
+        <div class="overlay__underline"></div>
+        <p class="overlay__score-label">Final Score</p>
+        <p class="overlay__score" id="gameOverScore">0</p>
+        <div class="overlay__actions">
+          <button type="button" class="chalk-btn" id="playAgainButton">Play Again</button>
+          <button type="button" class="chalk-btn" id="mainMenuButton">Main Menu</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <p id="errorToast" class="error-toast" hidden></p>
   <script src="/app.js"></script>
 </body>
 </html>
