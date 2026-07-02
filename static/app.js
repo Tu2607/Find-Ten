@@ -32,6 +32,7 @@ const state = {
 // Screen elements
 const welcomeScreen = document.getElementById("welcomeScreen");
 const settingsScreen = document.getElementById("settingsScreen");
+const leaderboardScreen = document.getElementById("leaderboardScreen");
 const gameScreen = document.getElementById("gameScreen");
 
 // Game elements
@@ -60,6 +61,26 @@ document.getElementById("settingsButton").addEventListener("click", () => {
 
 document.getElementById("settingsBackButton").addEventListener("click", () => {
   showScreen("welcome");
+});
+
+document.getElementById("leaderboardButton").addEventListener("click", () => {
+  showScreen("leaderboard");
+});
+
+document.getElementById("leaderboardBackButton").addEventListener("click", () => {
+  showScreen("welcome");
+});
+
+document.querySelectorAll(".chalk-pill-group").forEach((group) => {
+  group.addEventListener("click", (event) => {
+    const pill = event.target.closest(".chalk-pill");
+    if (!pill) return;
+
+    group.querySelectorAll(".chalk-pill").forEach((item) => {
+      item.classList.remove("chalk-pill--active");
+    });
+    pill.classList.add("chalk-pill--active");
+  });
 });
 
 const playAgainButtonEl = document.getElementById("playAgainButton");
@@ -138,6 +159,7 @@ function showScreen(name) {
   hideError();
   welcomeScreen.hidden = name !== "welcome";
   settingsScreen.hidden = name !== "settings";
+  leaderboardScreen.hidden = name !== "leaderboard";
   gameScreen.hidden = name !== "game";
 }
 

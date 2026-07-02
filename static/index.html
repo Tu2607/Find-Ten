@@ -48,7 +48,7 @@
           <nav class="welcome-menu">
             <button type="button" class="chalk-btn" id="playButton">Play</button>
             <button type="button" class="chalk-btn" id="settingsButton">Settings</button>
-            <button type="button" class="chalk-btn" disabled>Leaderboard</button>
+            <button type="button" class="chalk-btn" id="leaderboardButton">Leaderboard</button>
           </nav>
 
         </div>
@@ -126,6 +126,58 @@
         </div>
 
         <button type="button" class="chalk-btn" id="settingsBackButton">← Back</button>
+      </div>
+      <div class="chalk-tray" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <!-- ====== LEADERBOARD SCREEN ====== -->
+  <section id="leaderboardScreen" class="screen screen--leaderboard" hidden>
+    <div class="chalkboard">
+      <div class="chalkboard__surface">
+        <h2 class="chalk-heading">Leaderboard</h2>
+        <div class="chalk-underline"></div>
+
+        <div class="leaderboard-filters">
+          <div class="leaderboard-filter-group">
+            <span class="chalk-filter-label">Board</span>
+            <div class="chalk-pill-group" data-filter="board">
+              <button type="button" class="chalk-pill chalk-pill--active" data-value="all">All</button>
+              <button type="button" class="chalk-pill" data-value="9">9 x 9</button>
+              <button type="button" class="chalk-pill" data-value="10">10 x 10</button>
+              <button type="button" class="chalk-pill" data-value="11">11 x 11</button>
+            </div>
+          </div>
+
+          <div class="leaderboard-filter-group">
+            <span class="chalk-filter-label">Time</span>
+            <div class="chalk-pill-group" data-filter="timer">
+              <button type="button" class="chalk-pill chalk-pill--active" data-value="all">All</button>
+              <button type="button" class="chalk-pill" data-value="60">60s</button>
+              <button type="button" class="chalk-pill" data-value="120">120s</button>
+              <button type="button" class="chalk-pill" data-value="180">180s</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="leaderboard-table-wrapper">
+          <table class="leaderboard-table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Player</th>
+                <th>Score</th>
+                <th>Board</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboardBody"></tbody>
+          </table>
+
+          <p class="leaderboard-empty" id="leaderboardEmpty">No scores yet - play a game!</p>
+        </div>
+
+        <button type="button" class="chalk-btn" id="leaderboardBackButton">Back</button>
       </div>
       <div class="chalk-tray" aria-hidden="true"></div>
     </div>
