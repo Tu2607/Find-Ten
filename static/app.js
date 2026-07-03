@@ -42,6 +42,8 @@ const timeEl = document.getElementById("timeValue");
 const reshuffleButtonEl = document.getElementById("reshuffleButton");
 const removeNumberButtonEl = document.getElementById("removeNumberButton");
 const hintButtonEl = document.getElementById("hintButton");
+const colorSwatches = document.querySelectorAll(".color-swatches .swatch");
+const validBoardColors = new Set(["green", "blue", "red", "purple"]);
 
 // Game over overlay elements
 const gameOverOverlay = document.getElementById("gameOverOverlay");
@@ -69,6 +71,16 @@ document.getElementById("leaderboardButton").addEventListener("click", () => {
 
 document.getElementById("leaderboardBackButton").addEventListener("click", () => {
   showScreen("welcome");
+});
+
+colorSwatches.forEach((swatch) => {
+  swatch.addEventListener("click", () => {
+    colorSwatches.forEach((item) => {
+      const isActive = item === swatch;
+      item.classList.toggle("swatch--active", isActive);
+      item.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+  });
 });
 
 document.querySelectorAll(".chalk-pill-group").forEach((group) => {
@@ -178,6 +190,19 @@ function getSelectedFont() {
   return checked ? checked.value : "chalk";
 }
 
+function getSelectedBoardColor() {
+  const active = document.querySelector(".color-swatches .swatch--active");
+  const color = active?.dataset.boardColor ?? "green";
+  return validBoardColors.has(color) ? color : "green";
+}
+
+function applyBoardColor(color) {
+  gameScreen.classList.remove("board-color-blue", "board-color-red", "board-color-purple");
+  if (color !== "green" && validBoardColors.has(color)) {
+    gameScreen.classList.add(`board-color-${color}`);
+  }
+}
+
 function showGameOverOverlay() {
   gameOverReasonEl.textContent = gameOverReasonText(state.gameOverReason);
   gameOverScoreEl.textContent = state.score;
@@ -200,10 +225,12 @@ async function startGame() {
     const size = getSelectedBoardSize();
     const duration = getSelectedTimer();
     const font = getSelectedFont();
+    const boardColor = getSelectedBoardColor();
 
     closeStream();
     stopCountdown();
     hideGameOverOverlay();
+    applyBoardColor(boardColor);
 
     state.gameId = null;
     if (previousGameId) {

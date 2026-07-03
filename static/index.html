@@ -83,13 +83,12 @@
 
           <div class="settings-group">
             <h3 class="chalk-label">Background</h3>
-            <div class="color-swatches">
-              <button type="button" class="swatch swatch--green swatch--active" aria-label="Green"></button>
-              <button type="button" class="swatch swatch--blue" disabled aria-label="Blue"></button>
-              <button type="button" class="swatch swatch--red" disabled aria-label="Red"></button>
-              <button type="button" class="swatch swatch--purple" disabled aria-label="Purple"></button>
+            <div class="color-swatches" role="group" aria-label="Board color">
+              <button type="button" class="swatch swatch--green swatch--active" data-board-color="green" aria-label="Green" aria-pressed="true"></button>
+              <button type="button" class="swatch swatch--blue" data-board-color="blue" aria-label="Blue" aria-pressed="false"></button>
+              <button type="button" class="swatch swatch--red" data-board-color="red" aria-label="Red" aria-pressed="false"></button>
+              <button type="button" class="swatch swatch--purple" data-board-color="purple" aria-label="Purple" aria-pressed="false"></button>
             </div>
-            <p class="chalk-coming-soon">coming soon</p>
           </div>
 
           <div class="settings-group">

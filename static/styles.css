@@ -297,9 +297,17 @@ button {
   border-width: 3px;
 }
 
-.swatch:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.swatch:hover {
+  border-color: rgba(255, 255, 255, 0.95);
+}
+
+.swatch--active:hover {
+  border-color: #ffe680;
+}
+
+.swatch:focus-visible {
+  outline: 2px solid #ffe680;
+  outline-offset: 2px;
 }
 
 /* Font previews in settings */
@@ -434,10 +442,28 @@ button {
 
 .screen--game {
   position: relative;
+  --game-board-background: linear-gradient(to bottom, #2a4a3a, #1e3a2c, #162e22);
+  --game-overlay-scrim: rgba(10, 26, 16, 0.75);
 }
 
 .screen--game .chalkboard__surface {
   gap: 0;
+  background: var(--game-board-background);
+}
+
+.screen--game.board-color-blue {
+  --game-board-background: linear-gradient(to bottom, #2a3a5c, #1e2c4a, #162240);
+  --game-overlay-scrim: rgba(12, 22, 45, 0.75);
+}
+
+.screen--game.board-color-red {
+  --game-board-background: linear-gradient(to bottom, #5c2a2a, #4a1e1e, #3e1616);
+  --game-overlay-scrim: rgba(45, 12, 12, 0.75);
+}
+
+.screen--game.board-color-purple {
+  --game-board-background: linear-gradient(to bottom, #3d2a5c, #2e1e4a, #241640);
+  --game-overlay-scrim: rgba(30, 12, 45, 0.75);
 }
 
 .game-topbar {
@@ -608,7 +634,7 @@ button {
 .overlay__scrim {
   position: absolute;
   inset: 0;
-  background: rgba(10, 26, 16, 0.75);
+  background: var(--game-overlay-scrim, rgba(10, 26, 16, 0.75));
 }
 
 .overlay__popup {
@@ -620,6 +646,8 @@ button {
   border: 3px solid rgba(255, 255, 255, 0.65);
   border-radius: 10px;
   min-width: 360px;
+  background: var(--game-board-background, linear-gradient(to bottom, #2a4a3a, #1e3a2c, #162e22));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
 }
 
 .overlay__popup::after {

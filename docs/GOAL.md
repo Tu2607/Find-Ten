@@ -95,6 +95,7 @@ The browser settings screen supports:
 - board size selection: `9x9`, `10x10`, or `11x11`
 - timer selection: `60`, `120`, or `180` seconds
 - board font selection: Chalk, Clean, or Retro
+- board background color selection: Green, Blue, Red, or Purple
 
 ## Future Direction
 
