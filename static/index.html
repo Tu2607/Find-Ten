@@ -227,10 +227,39 @@
         <div class="overlay__underline"></div>
         <p class="overlay__score-label">Final Score</p>
         <p class="overlay__score" id="gameOverScore">0</p>
+        <div class="overlay__submit-area">
+          <button type="button" class="chalk-btn" id="submitScoreOpenButton">Submit Score</button>
+          <p class="overlay__submit-status" id="scoreSubmittedStatus" hidden>Score Submitted</p>
+        </div>
         <div class="overlay__actions">
           <button type="button" class="chalk-btn" id="playAgainButton">Play Again</button>
           <button type="button" class="chalk-btn" id="mainMenuButton">Main Menu</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Score Submission Overlay -->
+    <div id="scoreSubmissionOverlay" class="overlay" hidden>
+      <div class="overlay__scrim"></div>
+      <div class="overlay__popup overlay__popup--score-submit">
+        <h2 class="overlay__reason">Submit Score</h2>
+        <div class="overlay__underline"></div>
+        <form id="scoreSubmissionForm" class="score-submit-form">
+          <label class="score-submit-form__label" for="playerNameInput">Player Name</label>
+          <input
+            type="text"
+            id="playerNameInput"
+            class="score-submit-form__input"
+            name="playerName"
+            maxlength="20"
+            autocomplete="name"
+            placeholder="Your name"
+          >
+          <div class="overlay__actions overlay__actions--submit">
+            <button type="submit" class="chalk-btn" id="submitScoreButton" disabled>Submit</button>
+            <button type="button" class="chalk-btn" id="cancelScoreSubmitButton">Cancel</button>
+          </div>
+        </form>
       </div>
     </div>
   </section>

@@ -5,6 +5,7 @@ const state = {
   gameOver: false,
   gameOverReason: 0,
   gameOverPopupShown: false,
+  scoreSubmitted: false,
   reshuffleUsed: false,
   reshufflePending: false,
   removeNumberUsed: false,
@@ -49,6 +50,13 @@ const validBoardColors = new Set(["green", "blue", "red", "purple"]);
 const gameOverOverlay = document.getElementById("gameOverOverlay");
 const gameOverReasonEl = document.getElementById("gameOverReason");
 const gameOverScoreEl = document.getElementById("gameOverScore");
+const submitScoreOpenButtonEl = document.getElementById("submitScoreOpenButton");
+const scoreSubmittedStatusEl = document.getElementById("scoreSubmittedStatus");
+const scoreSubmissionOverlay = document.getElementById("scoreSubmissionOverlay");
+const scoreSubmissionFormEl = document.getElementById("scoreSubmissionForm");
+const playerNameInputEl = document.getElementById("playerNameInput");
+const submitScoreButtonEl = document.getElementById("submitScoreButton");
+const cancelScoreSubmitButtonEl = document.getElementById("cancelScoreSubmitButton");
 
 // Screen navigation
 const playButtonEl = document.getElementById("playButton");
@@ -98,12 +106,14 @@ document.querySelectorAll(".chalk-pill-group").forEach((group) => {
 const playAgainButtonEl = document.getElementById("playAgainButton");
 playAgainButtonEl.addEventListener("click", () => {
   hideGameOverOverlay();
+  hideScoreSubmissionOverlay();
   startGame();
 });
 
 document.getElementById("mainMenuButton").addEventListener("click", () => {
   state.startGeneration++;
   hideGameOverOverlay();
+  hideScoreSubmissionOverlay();
   closeStream();
   stopCountdown();
   if (state.gameId) abandonGame(state.gameId);
@@ -112,11 +122,13 @@ document.getElementById("mainMenuButton").addEventListener("click", () => {
 });
 
 document.getElementById("restartButton").addEventListener("click", () => {
+  hideScoreSubmissionOverlay();
   startGame();
 });
 
 document.getElementById("homeButton").addEventListener("click", () => {
   state.startGeneration++;
+  hideScoreSubmissionOverlay();
   closeStream();
   stopCountdown();
   if (state.gameId) abandonGame(state.gameId);
@@ -127,6 +139,13 @@ document.getElementById("homeButton").addEventListener("click", () => {
 reshuffleButtonEl.addEventListener("click", submitReshuffle);
 removeNumberButtonEl.addEventListener("click", enableRemoveMode);
 hintButtonEl.addEventListener("click", submitHint);
+submitScoreOpenButtonEl.addEventListener("click", showScoreSubmissionOverlay);
+cancelScoreSubmitButtonEl.addEventListener("click", () => {
+  hideScoreSubmissionOverlay();
+  if (state.gameOver) showGameOverOverlay();
+});
+playerNameInputEl.addEventListener("input", updateScoreSubmitButton);
+scoreSubmissionFormEl.addEventListener("submit", submitScore);
 
 // Scatter chalk formulas randomly across the welcome chalkboard
 (function scatterFormulas() {
@@ -206,11 +225,50 @@ function applyBoardColor(color) {
 function showGameOverOverlay() {
   gameOverReasonEl.textContent = gameOverReasonText(state.gameOverReason);
   gameOverScoreEl.textContent = state.score;
+  updateScoreSubmissionState();
   gameOverOverlay.hidden = false;
 }
 
 function hideGameOverOverlay() {
   gameOverOverlay.hidden = true;
+}
+
+function showScoreSubmissionOverlay() {
+  if (state.scoreSubmitted) {
+    return;
+  }
+
+  gameOverOverlay.hidden = true;
+  playerNameInputEl.value = "";
+  updateScoreSubmitButton();
+  scoreSubmissionOverlay.hidden = false;
+  playerNameInputEl.focus();
+}
+
+function hideScoreSubmissionOverlay() {
+  scoreSubmissionOverlay.hidden = true;
+}
+
+function submitScore(event) {
+  event.preventDefault();
+  const playerName = playerNameInputEl.value.trim();
+  if (!playerName || state.scoreSubmitted) {
+    updateScoreSubmitButton();
+    return;
+  }
+
+  state.scoreSubmitted = true;
+  hideScoreSubmissionOverlay();
+  showGameOverOverlay();
+}
+
+function updateScoreSubmitButton() {
+  submitScoreButtonEl.disabled = playerNameInputEl.value.trim() === "" || state.scoreSubmitted;
+}
+
+function updateScoreSubmissionState() {
+  submitScoreOpenButtonEl.hidden = state.scoreSubmitted;
+  scoreSubmittedStatusEl.hidden = !state.scoreSubmitted;
 }
 
 async function startGame() {
@@ -282,6 +340,7 @@ async function startGame() {
     state.selectedStart = null;
     state.hoverCell = null;
     state.gameOverPopupShown = false;
+    state.scoreSubmitted = false;
     state.reshuffleUsed = false;
     state.reshufflePending = false;
     state.removeNumberUsed = false;
