@@ -1,16 +1,26 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	"find-ten-game/internal/leaderboard"
+)
 
 type Server struct {
-	mux   *http.ServeMux
-	store *sessionStore
+	mux         *http.ServeMux
+	store       *sessionStore
+	leaderboard *leaderboard.Store
 }
 
-func NewServer() http.Handler {
+func NewServer(leaderboardStore *leaderboard.Store) http.Handler {
+	if leaderboardStore == nil {
+		panic("leaderboard store is required")
+	}
+
 	server := &Server{
-		mux:   http.NewServeMux(),
-		store: newSessionStore(),
+		mux:         http.NewServeMux(),
+		store:       newSessionStore(),
+		leaderboard: leaderboardStore,
 	}
 	server.routes()
 

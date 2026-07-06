@@ -250,6 +250,39 @@ Completed sessions are cleaned opportunistically when a new game is added. Clean
 
 New session creation is capped at `150` stored sessions after cleanup. If the store remains full, creation fails with `503 Service Unavailable`.
 
+## Leaderboard Persistence
+
+Submitted leaderboard scores are persisted separately from active game sessions.
+
+The leaderboard storage boundary lives under `internal/leaderboard` and uses SQLite through the pure-Go `modernc.org/sqlite` driver. This keeps the Docker build compatible with `CGO_ENABLED=0` while adding durable score storage.
+
+The server opens the SQLite database during process startup. Startup creates the database parent directory, opens the configured database path, enables SQLite pragmas through the driver DSN, and runs idempotent schema creation for the initial leaderboard table and ranking index.
+
+The API server is constructed with the leaderboard store as an explicit dependency. Tests should use temporary SQLite leaderboard stores so the server construction path matches production.
+
+The current default database path is:
+
+```text
+./data/find-ten.db
+```
+
+Inside the Docker image this resolves to `/app/data/find-ten.db`. Docker Compose mounts persistent storage at `/app/data` so score data survives image rebuilds and container replacement.
+
+SQLite is allowed to own read/write coordination. The application does not add a score-submission worker queue or an app-level reader-writer lock in front of the database. Score writes should be short synchronous inserts, and leaderboard reads should query the latest committed table state available to that read. The Go SQL connection pool is capped to a small number of open connections so WAL-mode reads can still overlap writes without allowing unbounded SQLite connections under HTTP load.
+
+The initial table stores one row per submitted score. `game_id` is unique so future API work can prevent duplicate submissions for the same completed game. The score-submission API must use the existing server-generated opaque game ID from the active session store; clients must not provide their own independent score IDs.
+
+Leaderboard ordering is deterministic: score descending, remaining time descending, submission time ascending, then the internal SQLite `id` ascending. The `id` tie-breaker is not player-facing; it exists so future rank queries can place a submitted score consistently even when score, remaining time, and submitted timestamp are identical.
+
+The leaderboard repository can:
+- initialize the schema
+- insert one submitted score
+- reject duplicate `game_id` submissions
+- query top scores by board size and duration
+- enforce repository-level storage sanity checks for non-negative scores, remaining time bounds, supported board size and duration, and player-name characters
+
+The leaderboard repository does not validate live game status. A later API step must derive score, board size, duration, and remaining time from backend-owned game session state before calling the repository. Player names are intentionally limited to ASCII letters, digits, spaces, hyphen, underscore, and apostrophe for the first persisted leaderboard implementation.
+
 ### Abandon Game
 
 `DELETE /games/{id}` explicitly abandons a known session.

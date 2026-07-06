@@ -7,16 +7,46 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"find-ten-game/internal/game"
+	"find-ten-game/internal/leaderboard"
 )
 
 func TestNewServerReturnsHTTPHandler(t *testing.T) {
-	var _ http.Handler = NewServer()
+	var _ http.Handler = newTestServer(t)
+}
+
+func newTestServer(t *testing.T) *Server {
+	t.Helper()
+
+	store := newTestLeaderboardStore(t)
+	server, ok := NewServer(store).(*Server)
+	if !ok {
+		t.Fatal("NewServer did not return *Server")
+	}
+
+	return server
+}
+
+func newTestLeaderboardStore(t *testing.T) *leaderboard.Store {
+	t.Helper()
+
+	store, err := leaderboard.Open(context.Background(), filepath.Join(t.TempDir(), "leaderboard.db"))
+	if err != nil {
+		t.Fatalf("leaderboard.Open failed: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("leaderboard store Close failed: %v", err)
+		}
+	})
+
+	return store
 }
 
 func TestServerRouteDispatch(t *testing.T) {
@@ -124,7 +154,7 @@ func TestServerRouteDispatch(t *testing.T) {
 		},
 	}
 
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			body := strings.NewReader("")
@@ -171,7 +201,7 @@ func TestStaticFiles(t *testing.T) {
 		},
 	}
 
-	server := NewServer()
+	server := newTestServer(t)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, test.path, nil)
@@ -187,7 +217,7 @@ func TestStaticFiles(t *testing.T) {
 }
 
 func TestCreateGame(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(`{"size":9}`))
 	response := httptest.NewRecorder()
 
@@ -227,7 +257,7 @@ func TestCreateGame(t *testing.T) {
 }
 
 func TestCreateGameUsesRequestedBoardSize(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(`{"size":10}`))
 	response := httptest.NewRecorder()
 
@@ -300,7 +330,7 @@ func TestCreateGameBadRequests(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			server := NewServer()
+			server := newTestServer(t)
 			request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(test.body))
 			response := httptest.NewRecorder()
 
@@ -314,7 +344,7 @@ func TestCreateGameBadRequests(t *testing.T) {
 }
 
 func TestCreateGameWithDuration(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 
 	before := time.Now()
 	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(`{"size":9,"duration":60}`))
@@ -349,7 +379,7 @@ func TestCreateGameWithDuration(t *testing.T) {
 }
 
 func TestCreateGameInvalidDuration(t *testing.T) {
-	server := NewServer()
+	server := newTestServer(t)
 
 	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(`{"size":9,"duration":45}`))
 	response := httptest.NewRecorder()
@@ -361,7 +391,7 @@ func TestCreateGameInvalidDuration(t *testing.T) {
 }
 
 func TestCreateGameReturnsServiceUnavailableWhenSessionStoreIsFull(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	server.store.maxSessions = 0
 
 	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(`{"size":9}`))
@@ -375,7 +405,7 @@ func TestCreateGameReturnsServiceUnavailableWhenSessionStoreIsFull(t *testing.T)
 }
 
 func TestCreateGameReturnsServiceUnavailableAtProductionCapacity(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	createdGames := make([]createdGameForTest, 0, defaultMaxStoredSessions)
 
 	defer func() {
@@ -399,7 +429,7 @@ func TestCreateGameReturnsServiceUnavailableAtProductionCapacity(t *testing.T) {
 }
 
 func TestDeleteGameRemovesAndStopsSession(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 
 	request := httptest.NewRequest(http.MethodDelete, "/games/"+created.response.GameID, nil)
@@ -422,7 +452,7 @@ func TestDeleteGameRemovesAndStopsSession(t *testing.T) {
 }
 
 func TestDeleteGameUnknownReturnsNotFound(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 
 	request := httptest.NewRequest(http.MethodDelete, "/games/missing", nil)
 	response := httptest.NewRecorder()
@@ -435,7 +465,7 @@ func TestDeleteGameUnknownReturnsNotFound(t *testing.T) {
 }
 
 func TestDeletedGameRequestsReturnNotFound(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 
 	deleteRequest := httptest.NewRequest(http.MethodDelete, "/games/"+created.response.GameID, nil)
@@ -495,7 +525,7 @@ func TestDeletedGameRequestsReturnNotFound(t *testing.T) {
 }
 
 func TestSubmitMove(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -525,7 +555,7 @@ func TestSubmitMove(t *testing.T) {
 }
 
 func TestSubmitMovePublishesSnapshotToSSE(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -563,7 +593,7 @@ func TestSubmitMovePublishesSnapshotToSSE(t *testing.T) {
 }
 
 func TestSubmitReshuffle(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -588,7 +618,7 @@ func TestSubmitReshuffle(t *testing.T) {
 }
 
 func TestSubmitReshufflePublishesSnapshotToSSE(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -628,7 +658,7 @@ func TestSubmitReshufflePublishesSnapshotToSSE(t *testing.T) {
 }
 
 func TestSubmitReshuffleUnknownGameReturnsNotFound(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	response := postReshuffleForTest(t, server, "missing")
 
 	if response.Code != http.StatusNotFound {
@@ -637,7 +667,7 @@ func TestSubmitReshuffleUnknownGameReturnsNotFound(t *testing.T) {
 }
 
 func TestSubmitReshuffleAlreadyUsedReturnsUnprocessable(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -653,7 +683,7 @@ func TestSubmitReshuffleAlreadyUsedReturnsUnprocessable(t *testing.T) {
 }
 
 func TestSubmitReshuffleStoppedSessionReturnsGone(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	created.stored.session.Stop()
 
@@ -665,7 +695,7 @@ func TestSubmitReshuffleStoppedSessionReturnsGone(t *testing.T) {
 }
 
 func TestSubmitRemoveNumber(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -695,7 +725,7 @@ func TestSubmitRemoveNumber(t *testing.T) {
 }
 
 func TestSubmitRemoveNumberPublishesSnapshotToSSE(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -743,7 +773,7 @@ func TestSubmitRemoveNumberPublishesSnapshotToSSE(t *testing.T) {
 }
 
 func TestSubmitRemoveNumberUnknownGameReturnsNotFound(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	response := postRemoveNumberForTest(t, server, "missing", game.Position{})
 
 	if response.Code != http.StatusNotFound {
@@ -776,7 +806,7 @@ func TestSubmitRemoveNumberBadRequests(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			server := NewServer().(*Server)
+			server := newTestServer(t)
 			created := createGameForTest(t, server, 9)
 			defer created.stored.session.Stop()
 
@@ -793,7 +823,7 @@ func TestSubmitRemoveNumberBadRequests(t *testing.T) {
 }
 
 func TestSubmitRemoveNumberOutOfBoundsReturnsBadRequest(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -805,7 +835,7 @@ func TestSubmitRemoveNumberOutOfBoundsReturnsBadRequest(t *testing.T) {
 }
 
 func TestSubmitRemoveNumberInvalidTargetDoesNotConsumeSkill(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -834,7 +864,7 @@ func TestSubmitRemoveNumberInvalidTargetDoesNotConsumeSkill(t *testing.T) {
 }
 
 func TestSubmitRemoveNumberAlreadyUsedReturnsUnprocessable(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -858,7 +888,7 @@ func TestSubmitRemoveNumberAlreadyUsedReturnsUnprocessable(t *testing.T) {
 }
 
 func TestSubmitRemoveNumberStoppedSessionReturnsGone(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	created.stored.session.Stop()
 
@@ -870,7 +900,7 @@ func TestSubmitRemoveNumberStoppedSessionReturnsGone(t *testing.T) {
 }
 
 func TestSubmitHint(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -895,7 +925,7 @@ func TestSubmitHint(t *testing.T) {
 }
 
 func TestSubmitHintPublishesSnapshotToSSE(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -938,7 +968,7 @@ func TestSubmitHintPublishesSnapshotToSSE(t *testing.T) {
 }
 
 func TestSubmitHintUnknownGameReturnsNotFound(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	response := postHintForTest(t, server, "missing")
 
 	if response.Code != http.StatusNotFound {
@@ -947,7 +977,7 @@ func TestSubmitHintUnknownGameReturnsNotFound(t *testing.T) {
 }
 
 func TestSubmitHintAlreadyUsedReturnsUnprocessable(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -963,7 +993,7 @@ func TestSubmitHintAlreadyUsedReturnsUnprocessable(t *testing.T) {
 }
 
 func TestSubmitHintStoppedSessionReturnsGone(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	created.stored.session.Stop()
 
@@ -975,7 +1005,7 @@ func TestSubmitHintStoppedSessionReturnsGone(t *testing.T) {
 }
 
 func TestSubmitMoveUnknownGameReturnsNotFound(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	response := postMoveForTest(t, server, "missing", game.Selection{})
 
 	if response.Code != http.StatusNotFound {
@@ -1024,7 +1054,7 @@ func TestSubmitMoveBadRequests(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			server := NewServer().(*Server)
+			server := newTestServer(t)
 			created := createGameForTest(t, server, 9)
 			defer created.stored.session.Stop()
 
@@ -1041,7 +1071,7 @@ func TestSubmitMoveBadRequests(t *testing.T) {
 }
 
 func TestSubmitMoveOutOfBoundsReturnsBadRequest(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -1056,7 +1086,7 @@ func TestSubmitMoveOutOfBoundsReturnsBadRequest(t *testing.T) {
 }
 
 func TestSubmitMoveInvalidMoveReturnsBadRequestAndDoesNotEndGame(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -1080,7 +1110,7 @@ func TestSubmitMoveInvalidMoveReturnsBadRequestAndDoesNotEndGame(t *testing.T) {
 }
 
 func TestSubmitMoveStoppedSessionReturnsGone(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	created.stored.session.Stop()
 
@@ -1106,7 +1136,7 @@ func TestWriteMoveErrorMapsGameOverToConflict(t *testing.T) {
 }
 
 func TestGameSnapshotsSSEOpensStream(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -1141,7 +1171,7 @@ func TestGameSnapshotsSSEOpensStream(t *testing.T) {
 }
 
 func TestGameSnapshotsSSEReceivesRuntimeSnapshot(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -1177,7 +1207,7 @@ func TestGameSnapshotsSSEReceivesRuntimeSnapshot(t *testing.T) {
 }
 
 func TestGameSnapshotsSSELateSubscriberReceivesLatestRuntimeSnapshot(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 	defer created.stored.session.Stop()
 
@@ -1213,7 +1243,7 @@ func TestGameSnapshotsSSELateSubscriberReceivesLatestRuntimeSnapshot(t *testing.
 }
 
 func TestGameSnapshotsUnknownGameReturnsNotFound(t *testing.T) {
-	server := NewServer()
+	server := newTestServer(t)
 	request := httptest.NewRequest(http.MethodGet, "/games/missing/snapshots", nil)
 	response := httptest.NewRecorder()
 
@@ -1225,7 +1255,7 @@ func TestGameSnapshotsUnknownGameReturnsNotFound(t *testing.T) {
 }
 
 func TestGameSnapshotsEndedGameReturnsGone(t *testing.T) {
-	server := NewServer().(*Server)
+	server := newTestServer(t)
 	created := createGameForTest(t, server, 9)
 
 	created.stored.session.Stop()
