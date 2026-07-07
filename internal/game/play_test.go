@@ -60,9 +60,15 @@ func TestRunGameEndsWhenTimerExpires(t *testing.T) {
 	if state.GameOverReason != GameOverTimeExpired {
 		t.Fatalf("state.GameOverReason = %v, want %v", state.GameOverReason, GameOverTimeExpired)
 	}
-	_, ok := <-snapshots
-	if ok {
-		t.Fatal("received timer-expiry snapshot, want no snapshot")
+	snapshot, ok := <-snapshots
+	if !ok {
+		t.Fatal("snapshot channel closed without game-over snapshot")
+	}
+	if !snapshot.GameOver {
+		t.Fatal("snapshot.GameOver = false, want true")
+	}
+	if snapshot.GameOverReason != GameOverTimeExpired {
+		t.Fatalf("snapshot.GameOverReason = %v, want %v", snapshot.GameOverReason, GameOverTimeExpired)
 	}
 }
 
@@ -612,9 +618,12 @@ func TestRunGameRejectsMoveProcessedAfterExpiry(t *testing.T) {
 	if state.GameOverReason != GameOverTimeExpired {
 		t.Fatalf("state.GameOverReason = %v, want %v", state.GameOverReason, GameOverTimeExpired)
 	}
-	_, ok := <-snapshots
-	if ok {
-		t.Fatal("received snapshot for expired move, want none")
+	snapshot, ok := <-snapshots
+	if !ok {
+		t.Fatal("snapshot channel closed without game-over snapshot")
+	}
+	if !snapshot.GameOver {
+		t.Fatal("snapshot.GameOver = false, want true")
 	}
 }
 
@@ -641,9 +650,12 @@ func TestRunGameRejectsReshuffleProcessedAfterExpiry(t *testing.T) {
 	if state.GameOverReason != GameOverTimeExpired {
 		t.Fatalf("state.GameOverReason = %v, want %v", state.GameOverReason, GameOverTimeExpired)
 	}
-	_, ok := <-snapshots
-	if ok {
-		t.Fatal("received snapshot for expired reshuffle, want none")
+	snapshot, ok := <-snapshots
+	if !ok {
+		t.Fatal("snapshot channel closed without game-over snapshot")
+	}
+	if !snapshot.GameOver {
+		t.Fatal("snapshot.GameOver = false, want true")
 	}
 }
 
@@ -673,9 +685,12 @@ func TestRunGameRejectsRemoveNumberProcessedAfterExpiry(t *testing.T) {
 	if state.GameOverReason != GameOverTimeExpired {
 		t.Fatalf("state.GameOverReason = %v, want %v", state.GameOverReason, GameOverTimeExpired)
 	}
-	_, ok := <-snapshots
-	if ok {
-		t.Fatal("received snapshot for expired remove-number, want none")
+	snapshot, ok := <-snapshots
+	if !ok {
+		t.Fatal("snapshot channel closed without game-over snapshot")
+	}
+	if !snapshot.GameOver {
+		t.Fatal("snapshot.GameOver = false, want true")
 	}
 }
 
@@ -712,9 +727,12 @@ func TestRunGameRejectsHintProcessedAfterExpiry(t *testing.T) {
 	if hint != (Selection{}) {
 		t.Fatalf("hint = %+v, want zero value", hint)
 	}
-	_, ok := <-snapshots
-	if ok {
-		t.Fatal("received snapshot for expired hint, want none")
+	snapshot, ok := <-snapshots
+	if !ok {
+		t.Fatal("snapshot channel closed without game-over snapshot")
+	}
+	if !snapshot.GameOver {
+		t.Fatal("snapshot.GameOver = false, want true")
 	}
 }
 

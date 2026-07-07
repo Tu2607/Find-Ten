@@ -101,6 +101,12 @@ func (b *snapshotBroker) publish(snapshot snapshotResponse) {
 	}
 }
 
+func (b *snapshotBroker) latestSnapshot() (snapshotResponse, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.latest, b.hasLatest
+}
+
 func (b *snapshotBroker) close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()

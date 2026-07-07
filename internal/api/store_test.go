@@ -16,7 +16,7 @@ func TestSessionStoreRemoveDeletesSession(t *testing.T) {
 	}
 	defer session.Stop()
 
-	id, err := store.add(session)
+	id, err := store.add(session, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("add returned error: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestSessionStoreAddPrunesCompletedSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewGameSession returned error: %v", err)
 	}
-	completedID, err := store.add(completed)
+	completedID, err := store.add(completed, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("add completed candidate returned error: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestSessionStoreAddPrunesCompletedSessions(t *testing.T) {
 	}
 	defer active.Stop()
 
-	if _, err := store.add(active); err != nil {
+	if _, err := store.add(active, game.DefaultDurationSeconds); err != nil {
 		t.Fatalf("add active session returned error: %v", err)
 	}
 
@@ -71,7 +71,7 @@ func TestSessionStoreAddKeepsActiveSessions(t *testing.T) {
 	}
 	defer active.Stop()
 
-	activeID, err := store.add(active)
+	activeID, err := store.add(active, game.DefaultDurationSeconds)
 	if err != nil {
 		t.Fatalf("add active session returned error: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestSessionStoreAddKeepsActiveSessions(t *testing.T) {
 	}
 	defer another.Stop()
 
-	if _, err := store.add(another); err != nil {
+	if _, err := store.add(another, game.DefaultDurationSeconds); err != nil {
 		t.Fatalf("add second session returned error: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestSessionStoreAddSucceedsWhenPruneFreesCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewGameSession returned error: %v", err)
 	}
-	if _, err := store.add(completed); err != nil {
+	if _, err := store.add(completed, game.DefaultDurationSeconds); err != nil {
 		t.Fatalf("add completed candidate returned error: %v", err)
 	}
 	completed.Stop()
@@ -111,7 +111,7 @@ func TestSessionStoreAddSucceedsWhenPruneFreesCapacity(t *testing.T) {
 	}
 	defer replacement.Stop()
 
-	if _, err := store.add(replacement); err != nil {
+	if _, err := store.add(replacement, game.DefaultDurationSeconds); err != nil {
 		t.Fatalf("add replacement returned error: %v", err)
 	}
 }
@@ -126,7 +126,7 @@ func TestSessionStoreAddFailsWhenActiveSessionsReachCapacity(t *testing.T) {
 	}
 	defer active.Stop()
 
-	if _, err := store.add(active); err != nil {
+	if _, err := store.add(active, game.DefaultDurationSeconds); err != nil {
 		t.Fatalf("add active session returned error: %v", err)
 	}
 
@@ -136,7 +136,7 @@ func TestSessionStoreAddFailsWhenActiveSessionsReachCapacity(t *testing.T) {
 	}
 	defer extra.Stop()
 
-	if _, err := store.add(extra); !errors.Is(err, errSessionStoreFull) {
+	if _, err := store.add(extra, game.DefaultDurationSeconds); !errors.Is(err, errSessionStoreFull) {
 		t.Fatalf("add extra error = %v, want %v", err, errSessionStoreFull)
 	}
 }

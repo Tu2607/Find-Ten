@@ -184,6 +184,8 @@ func RunGame(ctx context.Context, actions <-chan PlayerActionRequest, expired <-
 				continue
 			}
 			expireGame(state)
+			snapshot := newGameSnapshot(state, sequence)
+			publishPreparedSnapshot(ctx, snapshots, snapshot)
 			return
 		case request, ok := <-actions:
 			if !ok {
@@ -200,6 +202,10 @@ func RunGame(ctx context.Context, actions <-chan PlayerActionRequest, expired <-
 			}
 
 			if state == nil || state.GameOver {
+				if err != nil && state != nil {
+					snapshot := newGameSnapshot(state, sequence)
+					publishPreparedSnapshot(ctx, snapshots, snapshot)
+				}
 				return
 			}
 		}

@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"time"
 
 	"find-ten-game/internal/game"
+	"find-ten-game/internal/leaderboard"
 )
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +59,7 @@ func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gameID, err := s.store.add(session)
+	gameID, err := s.store.add(session, durationSeconds)
 	if err != nil {
 		session.Stop()
 		if errors.Is(err, errSessionStoreFull) {
@@ -251,6 +254,142 @@ func writeSnapshotEvent(w io.Writer, snapshot snapshotResponse) error {
 	}
 
 	return nil
+}
+
+func (s *Server) handleSubmitScore(w http.ResponseWriter, r *http.Request) {
+	var request submitScoreRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	if request.GameID == nil || *request.GameID == "" {
+		writeError(w, http.StatusBadRequest, "gameId is required")
+		return
+	}
+	if request.PlayerName == nil {
+		writeError(w, http.StatusBadRequest, "playerName is required")
+		return
+	}
+
+	stored, ok := s.store.get(*request.GameID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "game not found")
+		return
+	}
+
+	snapshot, ok := stored.broker.latestSnapshot()
+	if !ok || !snapshot.GameOver {
+		writeError(w, http.StatusConflict, "game is not over")
+		return
+	}
+
+	remainingMillis := 0
+	if snapshot.GameOver && snapshot.GameOverReason != int(game.GameOverTimeExpired) {
+		remaining := stored.session.ExpiresAt().Sub(snapshot.SnapshotTime)
+		if remaining > 0 {
+			remainingMillis = int(remaining.Milliseconds())
+			maxMillis := stored.durationSeconds * 1000
+			if remainingMillis > maxMillis {
+				remainingMillis = maxMillis
+			}
+		}
+	}
+
+	submission := leaderboard.ScoreSubmission{
+		GameID:          *request.GameID,
+		PlayerName:      *request.PlayerName,
+		Score:           snapshot.Score,
+		GridSize:        len(snapshot.Board),
+		DurationSeconds: stored.durationSeconds,
+		RemainingMillis: remainingMillis,
+		SubmittedAt:     time.Now(),
+	}
+
+	if err := s.leaderboard.SubmitScore(r.Context(), submission); err != nil {
+		writeScoreError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(submitScoreResponse{Accepted: true})
+}
+
+func (s *Server) handleTopScores(w http.ResponseWriter, r *http.Request) {
+	gridSizeParam := r.URL.Query().Get("gridSize")
+	if gridSizeParam == "" {
+		writeError(w, http.StatusBadRequest, "gridSize is required")
+		return
+	}
+	gridSize, err := strconv.Atoi(gridSizeParam)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "gridSize must be an integer")
+		return
+	}
+	if err := game.ValidateBoardSize(gridSize); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	durationParam := r.URL.Query().Get("duration")
+	if durationParam == "" {
+		writeError(w, http.StatusBadRequest, "duration is required")
+		return
+	}
+	duration, err := strconv.Atoi(durationParam)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "duration must be an integer")
+		return
+	}
+	if err := game.ValidateDuration(duration); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	entries, err := s.leaderboard.TopScores(r.Context(), leaderboard.TopScoresFilter{
+		GridSize:        gridSize,
+		DurationSeconds: duration,
+		Limit:           15,
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			writeError(w, http.StatusRequestTimeout, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to query scores")
+		return
+	}
+
+	scores := make([]scoreResponse, len(entries))
+	for i, entry := range entries {
+		scores[i] = scoreResponse{
+			Rank:            i + 1,
+			PlayerName:      entry.PlayerName,
+			Score:           entry.Score,
+			GridSize:        entry.GridSize,
+			DurationSeconds: entry.DurationSeconds,
+			RemainingMillis: entry.RemainingMillis,
+			SubmittedAt:     entry.SubmittedAt,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(scores)
+}
+
+func writeScoreError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, leaderboard.ErrDuplicateGameID):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, leaderboard.ErrInvalidScoreSubmission):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		writeError(w, http.StatusRequestTimeout, err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, "failed to submit score")
+	}
 }
 
 func writeMoveError(w http.ResponseWriter, err error) {

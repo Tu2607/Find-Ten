@@ -39,6 +39,25 @@ type submitMoveResponse struct {
 	Accepted bool `json:"accepted"`
 }
 
+type submitScoreRequest struct {
+	GameID     *string `json:"gameId"`
+	PlayerName *string `json:"playerName"`
+}
+
+type submitScoreResponse struct {
+	Accepted bool `json:"accepted"`
+}
+
+type scoreResponse struct {
+	Rank            int       `json:"rank"`
+	PlayerName      string    `json:"playerName"`
+	Score           int       `json:"score"`
+	GridSize        int       `json:"gridSize"`
+	DurationSeconds int       `json:"durationSeconds"`
+	RemainingMillis int       `json:"remainingMillis"`
+	SubmittedAt     time.Time `json:"submittedAt"`
+}
+
 type hintResponse struct {
 	Selection selectionResponse `json:"selection"`
 }

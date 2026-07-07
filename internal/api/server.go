@@ -46,5 +46,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /games/{id}/remove-number", handleMethodNotAllowed)
 	s.mux.HandleFunc("POST /games/{id}/hint", s.handleHint)
 	s.mux.HandleFunc("GET /games/{id}/hint", handleMethodNotAllowed)
+	s.mux.HandleFunc("POST /scores", s.handleSubmitScore)
+	s.mux.HandleFunc("GET /scores", s.handleTopScores)
+	s.mux.HandleFunc("DELETE /scores", handleMethodNotAllowed)
+	s.mux.HandleFunc("PUT /scores", handleMethodNotAllowed)
+	s.mux.HandleFunc("PATCH /scores", handleMethodNotAllowed)
 	s.mux.Handle("GET /", http.FileServer(http.Dir("./static/")))
 }

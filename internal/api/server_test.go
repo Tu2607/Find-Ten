@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -151,6 +152,12 @@ func TestServerRouteDispatch(t *testing.T) {
 			method:     http.MethodGet,
 			path:       "/games/test-game/hint",
 			wantStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:       "top scores default",
+			method:     http.MethodGet,
+			path:       "/scores?gridSize=9&duration=120",
+			wantStatus: http.StatusOK,
 		},
 	}
 
@@ -1543,6 +1550,602 @@ func assertNoSSELineWithin(t *testing.T, body io.Reader, duration time.Duration)
 	case line := <-lines:
 		t.Fatalf("received SSE line %q before runtime snapshot", line)
 	case <-time.After(duration):
+	}
+}
+
+// --- Leaderboard endpoint tests ---
+
+func TestSubmitScoreHappyPath(t *testing.T) {
+	server := newTestServer(t)
+	created := createGameForTest(t, server, 9)
+
+	driveGameToOver(t, server, created)
+
+	response := postScoreForTest(t, server, created.response.GameID, "Ada")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusCreated)
+	}
+
+	var body submitScoreResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !body.Accepted {
+		t.Fatal("accepted = false, want true")
+	}
+
+	scores, err := server.leaderboard.TopScores(context.Background(), leaderboard.TopScoresFilter{
+		GridSize:        9,
+		DurationSeconds: game.DefaultDurationSeconds,
+		Limit:           1,
+	})
+	if err != nil {
+		t.Fatalf("TopScores returned error: %v", err)
+	}
+	if len(scores) != 1 {
+		t.Fatalf("len(scores) = %d, want 1", len(scores))
+	}
+	if scores[0].GameID != created.response.GameID {
+		t.Fatalf("GameID = %q, want %q", scores[0].GameID, created.response.GameID)
+	}
+	if scores[0].PlayerName != "Ada" {
+		t.Fatalf("PlayerName = %q, want %q", scores[0].PlayerName, "Ada")
+	}
+	if scores[0].GridSize != 9 {
+		t.Fatalf("GridSize = %d, want 9", scores[0].GridSize)
+	}
+	if scores[0].DurationSeconds != game.DefaultDurationSeconds {
+		t.Fatalf("DurationSeconds = %d, want %d", scores[0].DurationSeconds, game.DefaultDurationSeconds)
+	}
+	if scores[0].Score < 0 {
+		t.Fatalf("Score = %d, want non-negative", scores[0].Score)
+	}
+	if scores[0].RemainingMillis < 0 {
+		t.Fatalf("RemainingMillis = %d, want non-negative", scores[0].RemainingMillis)
+	}
+	if scores[0].RemainingMillis > game.DefaultDurationSeconds*1000 {
+		t.Fatalf("RemainingMillis = %d, exceeds duration", scores[0].RemainingMillis)
+	}
+}
+
+func TestSubmitScoreServerDerivedValuesMatchFinalSnapshot(t *testing.T) {
+	server := newTestServer(t)
+	created := createGameForTest(t, server, 9)
+
+	driveGameToOver(t, server, created)
+
+	finalSnapshot, ok := created.stored.broker.latestSnapshot()
+	if !ok {
+		t.Fatal("broker has no latest snapshot after game over")
+	}
+
+	response := postScoreForTest(t, server, created.response.GameID, "Ada")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusCreated)
+	}
+
+	scores, err := server.leaderboard.TopScores(context.Background(), leaderboard.TopScoresFilter{
+		GridSize:        9,
+		DurationSeconds: game.DefaultDurationSeconds,
+		Limit:           1,
+	})
+	if err != nil {
+		t.Fatalf("TopScores returned error: %v", err)
+	}
+	if len(scores) != 1 {
+		t.Fatalf("len(scores) = %d, want 1", len(scores))
+	}
+	if scores[0].Score != finalSnapshot.Score {
+		t.Fatalf("persisted Score = %d, want %d (from final snapshot)", scores[0].Score, finalSnapshot.Score)
+	}
+}
+
+func TestSubmitScoreActiveGameReturnsConflict(t *testing.T) {
+	server := newTestServer(t)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	response := postScoreForTest(t, server, created.response.GameID, "Ada")
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusConflict)
+	}
+}
+
+func TestSubmitScoreTimerExpiredGameReturnsCreated(t *testing.T) {
+	server := newTestServer(t)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	created.stored.broker.publish(snapshotResponse{
+		Sequence:       2,
+		Board:          created.response.InitialSnapshot.Board,
+		Score:          0,
+		GameOver:       true,
+		GameOverReason: int(game.GameOverTimeExpired),
+		SnapshotTime:   created.stored.session.ExpiresAt(),
+	})
+
+	response := postScoreForTest(t, server, created.response.GameID, "Ada")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusCreated)
+	}
+
+	scores, err := server.leaderboard.TopScores(context.Background(), leaderboard.TopScoresFilter{
+		GridSize:        9,
+		DurationSeconds: game.DefaultDurationSeconds,
+		Limit:           1,
+	})
+	if err != nil {
+		t.Fatalf("TopScores returned error: %v", err)
+	}
+	if len(scores) != 1 {
+		t.Fatalf("len(scores) = %d, want 1", len(scores))
+	}
+	if scores[0].RemainingMillis != 0 {
+		t.Fatalf("RemainingMillis = %d, want 0", scores[0].RemainingMillis)
+	}
+}
+
+func TestSubmitScoreDuplicateReturnsConflict(t *testing.T) {
+	server := newTestServer(t)
+	created := createGameForTest(t, server, 9)
+
+	driveGameToOver(t, server, created)
+
+	response := postScoreForTest(t, server, created.response.GameID, "Ada")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("first submit status = %d, want %d", response.Code, http.StatusCreated)
+	}
+
+	response = postScoreForTest(t, server, created.response.GameID, "Ada")
+	if response.Code != http.StatusConflict {
+		t.Fatalf("second submit status = %d, want %d", response.Code, http.StatusConflict)
+	}
+}
+
+func TestSubmitScoreUnknownGameReturnsNotFound(t *testing.T) {
+	server := newTestServer(t)
+
+	response := postScoreForTest(t, server, "missing", "Ada")
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestSubmitScoreDeletedGameReturnsNotFound(t *testing.T) {
+	server := newTestServer(t)
+	created := createGameForTest(t, server, 9)
+	created.stored.session.Stop()
+	server.store.remove(created.response.GameID)
+
+	response := postScoreForTest(t, server, created.response.GameID, "Ada")
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestSubmitScoreBadRequests(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name:       "invalid JSON",
+			body:       `{"gameId":`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "empty body",
+			body:       "",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "missing gameId",
+			body:       `{"playerName":"Ada"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "empty gameId",
+			body:       `{"gameId":"","playerName":"Ada"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "missing playerName",
+			body:       `{"gameId":"nonexistent"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := newTestServer(t)
+			request := httptest.NewRequest(http.MethodPost, "/scores", strings.NewReader(test.body))
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d", response.Code, test.wantStatus)
+			}
+		})
+	}
+}
+
+func TestSubmitScoreInvalidPlayerNameReturnsBadRequest(t *testing.T) {
+	server := newTestServer(t)
+	created := createGameForTest(t, server, 9)
+
+	driveGameToOver(t, server, created)
+
+	response := postScoreForTest(t, server, created.response.GameID, "!!!")
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+func TestTopScoresHappyPath(t *testing.T) {
+	server := newTestServer(t)
+
+	seedScores(t, server, 9, game.DefaultDurationSeconds, 3)
+
+	response := getScoresForTest(t, server, 9, game.DefaultDurationSeconds)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var scores []scoreResponse
+	if err := json.NewDecoder(response.Body).Decode(&scores); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(scores) != 3 {
+		t.Fatalf("len(scores) = %d, want 3", len(scores))
+	}
+	for i, score := range scores {
+		if score.Rank != i+1 {
+			t.Errorf("scores[%d].Rank = %d, want %d", i, score.Rank, i+1)
+		}
+		if score.GridSize != 9 {
+			t.Errorf("scores[%d].GridSize = %d, want 9", i, score.GridSize)
+		}
+		if score.DurationSeconds != game.DefaultDurationSeconds {
+			t.Errorf("scores[%d].DurationSeconds = %d, want %d", i, score.DurationSeconds, game.DefaultDurationSeconds)
+		}
+	}
+	if scores[0].Score < scores[1].Score || scores[1].Score < scores[2].Score {
+		t.Fatal("scores are not in descending order")
+	}
+}
+
+func TestTopScoresFiltersCorrectly(t *testing.T) {
+	server := newTestServer(t)
+
+	seedScores(t, server, 9, game.DefaultDurationSeconds, 2)
+	seedScores(t, server, 10, game.DefaultDurationSeconds, 1)
+
+	response := getScoresForTest(t, server, 9, game.DefaultDurationSeconds)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var scores []scoreResponse
+	if err := json.NewDecoder(response.Body).Decode(&scores); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(scores) != 2 {
+		t.Fatalf("len(scores) = %d, want 2", len(scores))
+	}
+}
+
+func TestTopScoresEmptyReturnsEmptyArray(t *testing.T) {
+	server := newTestServer(t)
+
+	response := getScoresForTest(t, server, 9, game.DefaultDurationSeconds)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	body := strings.TrimSpace(response.Body.String())
+	if body != "[]" {
+		t.Fatalf("body = %q, want %q", body, "[]")
+	}
+}
+
+func TestTopScoresLimitsTo15(t *testing.T) {
+	server := newTestServer(t)
+
+	seedScores(t, server, 9, game.DefaultDurationSeconds, 20)
+
+	response := getScoresForTest(t, server, 9, game.DefaultDurationSeconds)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var scores []scoreResponse
+	if err := json.NewDecoder(response.Body).Decode(&scores); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(scores) != 15 {
+		t.Fatalf("len(scores) = %d, want 15", len(scores))
+	}
+}
+
+func TestTopScoresFiltersByDuration(t *testing.T) {
+	server := newTestServer(t)
+
+	seedScores(t, server, 9, 60, 2)
+	seedScores(t, server, 9, 120, 3)
+
+	response := getScoresForTest(t, server, 9, 60)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var scores []scoreResponse
+	if err := json.NewDecoder(response.Body).Decode(&scores); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(scores) != 2 {
+		t.Fatalf("len(scores) = %d, want 2", len(scores))
+	}
+	for i, score := range scores {
+		if score.DurationSeconds != 60 {
+			t.Errorf("scores[%d].DurationSeconds = %d, want 60", i, score.DurationSeconds)
+		}
+	}
+}
+
+func TestTopScoresTieBreakOrdering(t *testing.T) {
+	server := newTestServer(t)
+
+	now := time.Now()
+	for i, sub := range []leaderboard.ScoreSubmission{
+		{GameID: "tie-a", PlayerName: "Alice", Score: 50, GridSize: 9, DurationSeconds: 120, RemainingMillis: 5000, SubmittedAt: now.Add(2 * time.Second)},
+		{GameID: "tie-b", PlayerName: "Bob", Score: 50, GridSize: 9, DurationSeconds: 120, RemainingMillis: 5000, SubmittedAt: now.Add(1 * time.Second)},
+		{GameID: "tie-c", PlayerName: "Carol", Score: 50, GridSize: 9, DurationSeconds: 120, RemainingMillis: 10000, SubmittedAt: now},
+	} {
+		if err := server.leaderboard.SubmitScore(context.Background(), sub); err != nil {
+			t.Fatalf("seed score %d: %v", i, err)
+		}
+	}
+
+	response := getScoresForTest(t, server, 9, 120)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var scores []scoreResponse
+	if err := json.NewDecoder(response.Body).Decode(&scores); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(scores) != 3 {
+		t.Fatalf("len(scores) = %d, want 3", len(scores))
+	}
+	if scores[0].PlayerName != "Carol" {
+		t.Fatalf("rank 1 = %q, want Carol (highest remaining millis)", scores[0].PlayerName)
+	}
+	if scores[1].PlayerName != "Bob" {
+		t.Fatalf("rank 2 = %q, want Bob (earlier submitted_at)", scores[1].PlayerName)
+	}
+	if scores[2].PlayerName != "Alice" {
+		t.Fatalf("rank 3 = %q, want Alice (later submitted_at)", scores[2].PlayerName)
+	}
+}
+
+func TestTopScoresBadRequests(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{
+			name:  "missing gridSize",
+			query: "?duration=120",
+		},
+		{
+			name:  "missing duration",
+			query: "?gridSize=9",
+		},
+		{
+			name:  "non-integer gridSize",
+			query: "?gridSize=abc&duration=120",
+		},
+		{
+			name:  "non-integer duration",
+			query: "?gridSize=9&duration=abc",
+		},
+		{
+			name:  "unsupported gridSize",
+			query: "?gridSize=99&duration=120",
+		},
+		{
+			name:  "unsupported duration",
+			query: "?gridSize=9&duration=45",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := newTestServer(t)
+			request := httptest.NewRequest(http.MethodGet, "/scores"+test.query, nil)
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func TestSubmitScoreImmediatelyAfterFinalMove(t *testing.T) {
+	server := newTestServer(t)
+	created := createGameForTest(t, server, 9)
+
+	board := created.response.InitialSnapshot.Board
+	for {
+		move, ok := firstValidSelection(board)
+		if !ok {
+			break
+		}
+
+		response := postMoveForTest(t, server, created.response.GameID, move)
+		if response.Code != http.StatusOK {
+			t.Fatalf("move status = %d, want %d", response.Code, http.StatusOK)
+		}
+
+		for row := move.Start.Row; row <= move.End.Row; row++ {
+			for col := move.Start.Col; col <= move.End.Col; col++ {
+				board[row][col] = 0
+			}
+		}
+	}
+
+	response := postScoreForTest(t, server, created.response.GameID, "Ada")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusCreated)
+	}
+}
+
+func TestTopScoresDoesNotExposeIDOrGameID(t *testing.T) {
+	server := newTestServer(t)
+	seedScores(t, server, 9, game.DefaultDurationSeconds, 1)
+
+	response := getScoresForTest(t, server, 9, game.DefaultDurationSeconds)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var rawScores []map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&rawScores); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(rawScores) != 1 {
+		t.Fatalf("len(scores) = %d, want 1", len(rawScores))
+	}
+	if _, ok := rawScores[0]["id"]; ok {
+		t.Fatal("response exposes 'id' field")
+	}
+	if _, ok := rawScores[0]["gameId"]; ok {
+		t.Fatal("response exposes 'gameId' field")
+	}
+}
+
+func TestScoresRouteDispatch(t *testing.T) {
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+	}{
+		{
+			name:       "unsupported DELETE method",
+			method:     http.MethodDelete,
+			path:       "/scores",
+			wantStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:       "unsupported PUT method",
+			method:     http.MethodPut,
+			path:       "/scores",
+			wantStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:       "unsupported PATCH method",
+			method:     http.MethodPatch,
+			path:       "/scores",
+			wantStatus: http.StatusMethodNotAllowed,
+		},
+	}
+
+	server := newTestServer(t)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, test.path, nil)
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d", response.Code, test.wantStatus)
+			}
+		})
+	}
+}
+
+// --- Leaderboard test helpers ---
+
+func postScoreForTest(t *testing.T, server *Server, gameID, playerName string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodPost, "/scores", strings.NewReader(scoreJSONForTest(gameID, playerName)))
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	return response
+}
+
+func getScoresForTest(t *testing.T, server *Server, gridSize, duration int) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodGet, "/scores?gridSize="+strconv.Itoa(gridSize)+"&duration="+strconv.Itoa(duration), nil)
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	return response
+}
+
+func scoreJSONForTest(gameID, playerName string) string {
+	return `{"gameId":"` + gameID + `","playerName":"` + playerName + `"}`
+}
+
+func driveGameToOver(t *testing.T, server *Server, created createdGameForTest) {
+	t.Helper()
+
+	board := created.response.InitialSnapshot.Board
+	for {
+		move, ok := firstValidSelection(board)
+		if !ok {
+			break
+		}
+
+		response := postMoveForTest(t, server, created.response.GameID, move)
+		if response.Code != http.StatusOK {
+			t.Fatalf("move status = %d, want %d", response.Code, http.StatusOK)
+		}
+
+		for row := move.Start.Row; row <= move.End.Row; row++ {
+			for col := move.Start.Col; col <= move.End.Col; col++ {
+				board[row][col] = 0
+			}
+		}
+	}
+
+	select {
+	case <-created.stored.session.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for game session to end")
+	}
+}
+
+func seedScores(t *testing.T, server *Server, gridSize, durationSeconds, count int) {
+	t.Helper()
+
+	for i := 0; i < count; i++ {
+		submission := leaderboard.ScoreSubmission{
+			GameID:          fmt.Sprintf("seed-%d-%d-%d-%d", gridSize, durationSeconds, count, i),
+			PlayerName:      fmt.Sprintf("Player%d", i),
+			Score:           (count - i) * 10,
+			GridSize:        gridSize,
+			DurationSeconds: durationSeconds,
+			RemainingMillis: i * 1000,
+			SubmittedAt:     time.Now(),
+		}
+		if err := server.leaderboard.SubmitScore(context.Background(), submission); err != nil {
+			t.Fatalf("seedScores: SubmitScore returned error: %v", err)
+		}
 	}
 }
 

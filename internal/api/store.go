@@ -23,8 +23,9 @@ type sessionStore struct {
 }
 
 type storedGame struct {
-	session *game.GameSession
-	broker  *snapshotBroker
+	session         *game.GameSession
+	broker          *snapshotBroker
+	durationSeconds int
 }
 
 func newSessionStore() *sessionStore {
@@ -34,15 +35,16 @@ func newSessionStore() *sessionStore {
 	}
 }
 
-func newStoredGame(session *game.GameSession) storedGame {
+func newStoredGame(session *game.GameSession, durationSeconds int) storedGame {
 	return storedGame{
-		session: session,
-		broker:  newSnapshotBroker(session.Snapshots()),
+		session:         session,
+		broker:          newSnapshotBroker(session.Snapshots()),
+		durationSeconds: durationSeconds,
 	}
 }
 
-func (s *sessionStore) add(session *game.GameSession) (string, error) {
-	stored := newStoredGame(session)
+func (s *sessionStore) add(session *game.GameSession, durationSeconds int) (string, error) {
+	stored := newStoredGame(session, durationSeconds)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
