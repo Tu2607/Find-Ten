@@ -6,6 +6,9 @@ const state = {
   gameOverReason: 0,
   gameOverPopupShown: false,
   scoreSubmitted: false,
+  scoreSubmitPending: false,
+  scoreSubmitGameId: null,
+  scoreSubmitController: null,
   reshuffleUsed: false,
   reshufflePending: false,
   removeNumberUsed: false,
@@ -27,6 +30,12 @@ const state = {
   countdownTimer: null,
   startPending: false,
   startGeneration: 0,
+  leaderboardBoardSize: 9,
+  leaderboardDuration: 120,
+  leaderboardScores: [],
+  leaderboardLoading: false,
+  leaderboardError: false,
+  leaderboardRequestId: 0,
   errorTimer: null
 };
 
@@ -35,6 +44,11 @@ const welcomeScreen = document.getElementById("welcomeScreen");
 const settingsScreen = document.getElementById("settingsScreen");
 const leaderboardScreen = document.getElementById("leaderboardScreen");
 const gameScreen = document.getElementById("gameScreen");
+
+// Leaderboard elements
+const leaderboardBodyEl = document.getElementById("leaderboardBody");
+const leaderboardEmptyEl = document.getElementById("leaderboardEmpty");
+const leaderboardFilterSummaryEl = document.getElementById("leaderboardFilterSummary");
 
 // Game elements
 const boardEl = document.getElementById("board");
@@ -45,6 +59,7 @@ const removeNumberButtonEl = document.getElementById("removeNumberButton");
 const hintButtonEl = document.getElementById("hintButton");
 const colorSwatches = document.querySelectorAll(".color-swatches .swatch");
 const validBoardColors = new Set(["green", "blue", "red", "purple"]);
+const scoreRequestTimeoutMs = 10000;
 
 // Game over overlay elements
 const gameOverOverlay = document.getElementById("gameOverOverlay");
@@ -57,6 +72,7 @@ const scoreSubmissionFormEl = document.getElementById("scoreSubmissionForm");
 const playerNameInputEl = document.getElementById("playerNameInput");
 const submitScoreButtonEl = document.getElementById("submitScoreButton");
 const cancelScoreSubmitButtonEl = document.getElementById("cancelScoreSubmitButton");
+const scoreSubmitErrorEl = document.getElementById("scoreSubmitError");
 
 // Screen navigation
 const playButtonEl = document.getElementById("playButton");
@@ -75,6 +91,7 @@ document.getElementById("settingsBackButton").addEventListener("click", () => {
 
 document.getElementById("leaderboardButton").addEventListener("click", () => {
   showScreen("leaderboard");
+  loadLeaderboardScores();
 });
 
 document.getElementById("leaderboardBackButton").addEventListener("click", () => {
@@ -91,7 +108,7 @@ colorSwatches.forEach((swatch) => {
   });
 });
 
-document.querySelectorAll(".chalk-pill-group").forEach((group) => {
+leaderboardScreen.querySelectorAll(".chalk-pill-group").forEach((group) => {
   group.addEventListener("click", (event) => {
     const pill = event.target.closest(".chalk-pill");
     if (!pill) return;
@@ -100,6 +117,7 @@ document.querySelectorAll(".chalk-pill-group").forEach((group) => {
       item.classList.remove("chalk-pill--active");
     });
     pill.classList.add("chalk-pill--active");
+    updateLeaderboardFilter(group.dataset.filter, pill.dataset.value);
   });
 });
 
@@ -240,30 +258,80 @@ function showScoreSubmissionOverlay() {
 
   gameOverOverlay.hidden = true;
   playerNameInputEl.value = "";
-  updateScoreSubmitButton();
+  resetScoreSubmissionRequest();
+  hideScoreSubmitError();
   scoreSubmissionOverlay.hidden = false;
   playerNameInputEl.focus();
 }
 
 function hideScoreSubmissionOverlay() {
   scoreSubmissionOverlay.hidden = true;
+  resetScoreSubmissionRequest({ abort: true });
 }
 
-function submitScore(event) {
+async function submitScore(event) {
   event.preventDefault();
   const playerName = playerNameInputEl.value.trim();
-  if (!playerName || state.scoreSubmitted) {
+  if (!playerName || state.scoreSubmitted || state.scoreSubmitPending) {
     updateScoreSubmitButton();
     return;
   }
+  if (!state.gameId) {
+    showScoreSubmitError("Game session is no longer available.");
+    return;
+  }
 
-  state.scoreSubmitted = true;
-  hideScoreSubmissionOverlay();
-  showGameOverOverlay();
+  const gameId = state.gameId;
+  const controller = new AbortController();
+  state.scoreSubmitPending = true;
+  state.scoreSubmitGameId = gameId;
+  state.scoreSubmitController = controller;
+  hideScoreSubmitError();
+  updateScoreSubmitButton();
+
+  let response;
+  try {
+    response = await fetchWithTimeout("/scores", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gameId, playerName })
+    }, controller);
+  } catch (err) {
+    if (!scoreSubmissionStillCurrent(gameId)) {
+      resetScoreSubmissionFor(gameId);
+      return;
+    }
+    resetScoreSubmissionRequest();
+    showScoreSubmitError(err && err.name === "AbortError" ? "Request timed out. Try again." : "Could not submit score. Check your connection.");
+    return;
+  }
+
+  if (!scoreSubmissionStillCurrent(gameId)) {
+    resetScoreSubmissionFor(gameId);
+    if (response.status === 201) {
+      showError("Score submitted for previous game.");
+    }
+    return;
+  }
+
+  if (response.status === 201) {
+    state.scoreSubmitted = true;
+    resetScoreSubmissionRequest();
+    hideScoreSubmitError();
+    hideScoreSubmissionOverlay();
+    showGameOverOverlay();
+    return;
+  }
+
+  resetScoreSubmissionRequest();
+  showScoreSubmitError(scoreSubmissionErrorMessage(response.status));
 }
 
 function updateScoreSubmitButton() {
-  submitScoreButtonEl.disabled = playerNameInputEl.value.trim() === "" || state.scoreSubmitted;
+  submitScoreButtonEl.disabled = playerNameInputEl.value.trim() === "" || state.scoreSubmitted || state.scoreSubmitPending;
+  submitScoreButtonEl.textContent = state.scoreSubmitPending ? "Submitting" : "Submit";
+  playerNameInputEl.disabled = state.scoreSubmitPending;
+  cancelScoreSubmitButtonEl.disabled = false;
 }
 
 function updateScoreSubmissionState() {
@@ -271,8 +339,201 @@ function updateScoreSubmissionState() {
   scoreSubmittedStatusEl.hidden = !state.scoreSubmitted;
 }
 
+function scoreSubmissionStillCurrent(gameId) {
+  return state.gameId === gameId && state.scoreSubmitGameId === gameId;
+}
+
+function resetScoreSubmissionFor(gameId) {
+  if (state.scoreSubmitGameId === gameId || state.scoreSubmitGameId === null) {
+    state.scoreSubmitPending = false;
+    state.scoreSubmitGameId = null;
+    state.scoreSubmitController = null;
+    updateScoreSubmitButton();
+  }
+}
+
+function resetScoreSubmissionRequest(options = {}) {
+  if (options.abort && state.scoreSubmitController) {
+    state.scoreSubmitController.abort();
+  }
+  state.scoreSubmitPending = false;
+  state.scoreSubmitGameId = null;
+  state.scoreSubmitController = null;
+  updateScoreSubmitButton();
+}
+
+function showScoreSubmitError(message) {
+  scoreSubmitErrorEl.textContent = message;
+  scoreSubmitErrorEl.hidden = false;
+}
+
+function hideScoreSubmitError() {
+  scoreSubmitErrorEl.textContent = "";
+  scoreSubmitErrorEl.hidden = true;
+}
+
+function scoreSubmissionErrorMessage(status) {
+  switch (status) {
+    case 400:
+      return "Use letters, numbers, spaces, hyphen, underscore, or apostrophe.";
+    case 404:
+      return "Game session is no longer available.";
+    case 408:
+      return "Could not submit score. Check your connection.";
+    case 409:
+      return "Score already submitted or game is not finished.";
+    default:
+      if (status >= 500) {
+        return "Server error. Try submitting again.";
+      }
+      return "Could not submit score. Try again.";
+  }
+}
+
+function updateLeaderboardFilter(filter, value) {
+  const numericValue = Number(value);
+  if (!Number.isInteger(numericValue)) {
+    return;
+  }
+
+  let changed = false;
+  if (filter === "board" && state.leaderboardBoardSize !== numericValue) {
+    state.leaderboardBoardSize = numericValue;
+    changed = true;
+  } else if (filter === "timer" && state.leaderboardDuration !== numericValue) {
+    state.leaderboardDuration = numericValue;
+    changed = true;
+  }
+
+  if (changed) {
+    updateLeaderboardFilterSummary();
+    if (!leaderboardScreen.hidden) {
+      loadLeaderboardScores();
+    }
+  }
+}
+
+async function loadLeaderboardScores() {
+  const requestId = ++state.leaderboardRequestId;
+  state.leaderboardLoading = true;
+  state.leaderboardError = false;
+  renderLeaderboardStatus("Loading scores...");
+
+  const gridSize = encodeURIComponent(String(state.leaderboardBoardSize));
+  const duration = encodeURIComponent(String(state.leaderboardDuration));
+  let response;
+  try {
+    response = await fetchWithTimeout(`/scores?gridSize=${gridSize}&duration=${duration}`);
+  } catch {
+    if (requestId !== state.leaderboardRequestId) return;
+    state.leaderboardLoading = false;
+    state.leaderboardError = true;
+    renderLeaderboardStatus("Could not load scores.");
+    return;
+  }
+
+  if (requestId !== state.leaderboardRequestId) return;
+
+  if (!response.ok) {
+    state.leaderboardLoading = false;
+    state.leaderboardError = true;
+    renderLeaderboardStatus("Could not load scores.");
+    return;
+  }
+  if (!(response.headers.get("Content-Type") || "").toLowerCase().includes("application/json")) {
+    state.leaderboardLoading = false;
+    state.leaderboardError = true;
+    renderLeaderboardStatus("Could not load scores.");
+    return;
+  }
+
+  let scores;
+  try {
+    scores = await response.json();
+  } catch {
+    if (requestId !== state.leaderboardRequestId) return;
+    state.leaderboardLoading = false;
+    state.leaderboardError = true;
+    renderLeaderboardStatus("Could not load scores.");
+    return;
+  }
+
+  if (requestId !== state.leaderboardRequestId) return;
+
+  if (!Array.isArray(scores)) {
+    state.leaderboardLoading = false;
+    state.leaderboardError = true;
+    renderLeaderboardStatus("Could not load scores.");
+    return;
+  }
+
+  state.leaderboardScores = scores;
+  state.leaderboardLoading = false;
+  state.leaderboardError = false;
+  renderLeaderboardScores();
+}
+
+function renderLeaderboardScores() {
+  updateLeaderboardFilterSummary();
+  leaderboardBodyEl.replaceChildren();
+
+  if (state.leaderboardScores.length === 0) {
+    leaderboardEmptyEl.textContent = "No scores yet - play a game!";
+    leaderboardEmptyEl.hidden = false;
+    return;
+  }
+
+  leaderboardEmptyEl.hidden = true;
+  state.leaderboardScores.forEach((score) => {
+    const row = document.createElement("tr");
+    row.appendChild(newLeaderboardCell(String(score.rank ?? "")));
+    row.appendChild(newLeaderboardCell(score.playerName ?? ""));
+    row.appendChild(newLeaderboardCell(String(score.score ?? 0)));
+    row.appendChild(newLeaderboardCell(formatRemainingMillis(score.remainingMillis)));
+    leaderboardBodyEl.appendChild(row);
+  });
+}
+
+function renderLeaderboardStatus(message) {
+  updateLeaderboardFilterSummary();
+  leaderboardBodyEl.replaceChildren();
+  leaderboardEmptyEl.textContent = message;
+  leaderboardEmptyEl.hidden = false;
+}
+
+function updateLeaderboardFilterSummary() {
+  leaderboardFilterSummaryEl.textContent = `Showing ${state.leaderboardBoardSize} x ${state.leaderboardBoardSize} - ${state.leaderboardDuration}s`;
+}
+
+function newLeaderboardCell(text) {
+  const cell = document.createElement("td");
+  cell.textContent = text;
+  return cell;
+}
+
+function formatRemainingMillis(value) {
+  const millis = Number(value);
+  if (!Number.isFinite(millis) || millis <= 0) {
+    return "0s";
+  }
+  if (millis < 1000) {
+    return "<1s";
+  }
+  return `${Math.floor(millis / 1000)}s`;
+}
+
+async function fetchWithTimeout(resource, options = {}, controller = new AbortController()) {
+  const timeout = setTimeout(() => controller.abort(), scoreRequestTimeoutMs);
+  try {
+    return await fetch(resource, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function startGame() {
   if (state.startPending) return;
+  resetScoreSubmissionRequest({ abort: true });
   state.startPending = true;
   playButtonEl.disabled = true;
   playAgainButtonEl.disabled = true;
@@ -354,6 +615,8 @@ async function startGame() {
     state.cellRefs = [];
     state.lastBoardSize = 0;
     state.lastBoardWidth = 0;
+    hideScoreSubmitError();
+    updateScoreSubmitButton();
 
     boardEl.classList.remove("font-chalk", "font-clean", "font-retro");
     boardEl.classList.add(`font-${font}`);

@@ -380,6 +380,13 @@ button {
   border-color: rgba(255, 255, 255, 0.85);
 }
 
+.leaderboard-filter-summary {
+  margin: 0 auto 14px;
+  color: #ffe680;
+  font-size: clamp(16px, 2vw, 22px);
+  text-align: center;
+}
+
 .leaderboard-table-wrapper {
   width: min(680px, 90vw);
   margin: 0 auto 24px;
@@ -420,9 +427,7 @@ button {
 }
 
 .leaderboard-table th:nth-child(4),
-.leaderboard-table td:nth-child(4),
-.leaderboard-table th:nth-child(5),
-.leaderboard-table td:nth-child(5) {
+.leaderboard-table td:nth-child(4) {
   text-align: center;
 }
 
@@ -757,6 +762,15 @@ button {
 .score-submit-form__input:focus {
   border-color: #ffe680;
   box-shadow: 0 0 0 2px rgba(255, 230, 128, 0.18);
+}
+
+.score-submit-form__error {
+  min-height: 1.2em;
+  margin: 0;
+  color: #ffb4a8;
+  font-size: clamp(15px, 1.8vw, 19px);
+  line-height: 1.2;
+  text-align: center;
 }
 
 .overlay__actions--submit {

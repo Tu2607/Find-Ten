@@ -141,8 +141,7 @@
           <div class="leaderboard-filter-group">
             <span class="chalk-filter-label">Board</span>
             <div class="chalk-pill-group" data-filter="board">
-              <button type="button" class="chalk-pill chalk-pill--active" data-value="all">All</button>
-              <button type="button" class="chalk-pill" data-value="9">9 x 9</button>
+              <button type="button" class="chalk-pill chalk-pill--active" data-value="9">9 x 9</button>
               <button type="button" class="chalk-pill" data-value="10">10 x 10</button>
               <button type="button" class="chalk-pill" data-value="11">11 x 11</button>
             </div>
@@ -151,13 +150,14 @@
           <div class="leaderboard-filter-group">
             <span class="chalk-filter-label">Time</span>
             <div class="chalk-pill-group" data-filter="timer">
-              <button type="button" class="chalk-pill chalk-pill--active" data-value="all">All</button>
               <button type="button" class="chalk-pill" data-value="60">60s</button>
-              <button type="button" class="chalk-pill" data-value="120">120s</button>
+              <button type="button" class="chalk-pill chalk-pill--active" data-value="120">120s</button>
               <button type="button" class="chalk-pill" data-value="180">180s</button>
             </div>
           </div>
         </div>
+
+        <p class="leaderboard-filter-summary" id="leaderboardFilterSummary">Showing 9 x 9 - 120s</p>
 
         <div class="leaderboard-table-wrapper">
           <table class="leaderboard-table">
@@ -166,14 +166,13 @@
                 <th>Rank</th>
                 <th>Player</th>
                 <th>Score</th>
-                <th>Board</th>
-                <th>Time</th>
+                <th>Left</th>
               </tr>
             </thead>
             <tbody id="leaderboardBody"></tbody>
           </table>
 
-          <p class="leaderboard-empty" id="leaderboardEmpty">No scores yet - play a game!</p>
+          <p class="leaderboard-empty" id="leaderboardEmpty" aria-live="polite">No scores yet - play a game!</p>
         </div>
 
         <button type="button" class="chalk-btn" id="leaderboardBackButton">Back</button>
@@ -255,6 +254,7 @@
             autocomplete="name"
             placeholder="Your name"
           >
+          <p class="score-submit-form__error" id="scoreSubmitError" aria-live="polite" hidden></p>
           <div class="overlay__actions overlay__actions--submit">
             <button type="submit" class="chalk-btn" id="submitScoreButton" disabled>Submit</button>
             <button type="button" class="chalk-btn" id="cancelScoreSubmitButton">Cancel</button>

@@ -21,6 +21,6 @@ COPY --from=builder /app/static ./static
 
 EXPOSE 8080
 
-CMD [ "./find-ten" ]
+CMD [ "./find-ten", "-db-path", "/app/data/find-ten.db" ]
 
 

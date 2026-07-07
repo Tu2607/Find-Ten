@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -358,6 +359,21 @@ func TestOpenRejectsEmptyPath(t *testing.T) {
 	_, err := Open(context.Background(), "")
 	if err == nil {
 		t.Fatal("Open succeeded, want error")
+	}
+}
+
+func TestOpenAcceptsRelativePath(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	store, err := Open(context.Background(), "./data/scores.db")
+	if err != nil {
+		t.Fatalf("Open relative path failed: %v", err)
+	}
+	closeStore(t, store)
+
+	if _, err := os.Stat(filepath.Join(dir, "data", "scores.db")); err != nil {
+		t.Fatalf("relative database file lookup failed: %v", err)
 	}
 }
 

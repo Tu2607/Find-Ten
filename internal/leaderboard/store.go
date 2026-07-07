@@ -68,11 +68,15 @@ func open(ctx context.Context, path string, now func() time.Time) (*Store, error
 	if path == "" {
 		return nil, fmt.Errorf("open leaderboard store: database path is required")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("open leaderboard store: resolve database path: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		return nil, fmt.Errorf("open leaderboard store: create database directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dsn(path))
+	db, err := sql.Open("sqlite", dsn(absPath))
 	if err != nil {
 		return nil, fmt.Errorf("open leaderboard store: %w", err)
 	}
