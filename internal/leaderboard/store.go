@@ -5,20 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
-	"os"
-	"path/filepath"
 	"time"
+
+	"find-ten-game/internal/sqlitedb"
 
 	sqlitedriver "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
 const (
-	defaultBusyTimeoutMillis = 5000
-	// The app can hold more active game sessions than DB connections because
-	// SQLite is used only for short leaderboard reads/writes, not live gameplay.
-	maxOpenConnections    = 16
 	defaultTopScoresLimit = 15
 	MaxTopScoresLimit     = 100
 )
@@ -29,8 +24,9 @@ var (
 )
 
 type Store struct {
-	db  *sql.DB
-	now func() time.Time
+	db      *sql.DB
+	now     func() time.Time
+	closeDB func() error
 }
 
 type ScoreSubmission struct {
@@ -60,43 +56,54 @@ type TopScoresFilter struct {
 	Limit           int
 }
 
+func NewStore(ctx context.Context, db *sql.DB) (*Store, error) {
+	return newStore(ctx, db, time.Now)
+}
+
+// Open creates a standalone SQLite connection for compatibility with tests and
+// single-store callers. Production paths that need multiple persistence stores
+// should open one database with sqlitedb.Open and pass it to NewStore.
 func Open(ctx context.Context, path string) (*Store, error) {
 	return open(ctx, path, time.Now)
 }
 
 func open(ctx context.Context, path string, now func() time.Time) (*Store, error) {
-	if path == "" {
-		return nil, fmt.Errorf("open leaderboard store: database path is required")
-	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return nil, fmt.Errorf("open leaderboard store: resolve database path: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-		return nil, fmt.Errorf("open leaderboard store: create database directory: %w", err)
-	}
-
-	db, err := sql.Open("sqlite", dsn(absPath))
+	db, err := sqlitedb.Open(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("open leaderboard store: %w", err)
 	}
-	db.SetMaxOpenConns(maxOpenConnections)
-	db.SetMaxIdleConns(maxOpenConnections)
 
-	store := &Store{
-		db:  db,
-		now: now,
-	}
-	if err := store.init(ctx); err != nil {
+	store, err := newStore(ctx, db, now)
+	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
+	store.closeDB = db.Close
 
 	return store, nil
 }
 
 func (s *Store) Close() error {
-	return s.db.Close()
+	return s.closeDB()
+}
+
+// newStore does not own db. Callers that open the database are responsible for
+// closing it on both success and initialization failure.
+func newStore(ctx context.Context, db *sql.DB, now func() time.Time) (*Store, error) {
+	if db == nil {
+		return nil, fmt.Errorf("new leaderboard store: database is required")
+	}
+
+	store := &Store{
+		db:      db,
+		now:     now,
+		closeDB: func() error { return nil },
+	}
+	if err := store.init(ctx); err != nil {
+		return nil, err
+	}
+
+	return store, nil
 }
 
 // Future HTTP handlers should pass r.Context() into Store methods so client
@@ -199,13 +206,6 @@ func (s *Store) TopScores(ctx context.Context, filter TopScoresFilter) ([]ScoreE
 }
 
 func (s *Store) init(ctx context.Context) error {
-	if err := s.db.PingContext(ctx); err != nil {
-		return fmt.Errorf("open leaderboard store: ping database: %w", err)
-	}
-	if err := s.verifyWALMode(ctx); err != nil {
-		return err
-	}
-
 	for _, statement := range schemaStatements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("initialize leaderboard schema: %w", err)
@@ -213,32 +213,6 @@ func (s *Store) init(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-func (s *Store) verifyWALMode(ctx context.Context) error {
-	var mode string
-	if err := s.db.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode); err != nil {
-		return fmt.Errorf("open leaderboard store: verify journal mode: %w", err)
-	}
-	if mode != "wal" {
-		return fmt.Errorf("open leaderboard store: journal mode = %q, want wal", mode)
-	}
-
-	return nil
-}
-
-func dsn(path string) string {
-	databaseURL := url.URL{
-		Scheme: "file",
-		Path:   filepath.ToSlash(path),
-	}
-	values := url.Values{}
-	values.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", defaultBusyTimeoutMillis))
-	values.Add("_pragma", "journal_mode(WAL)")
-	values.Add("_pragma", "foreign_keys(ON)")
-	databaseURL.RawQuery = values.Encode()
-
-	return databaseURL.String()
 }
 
 func sqliteConstraintCode(err error) (int, bool) {

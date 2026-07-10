@@ -13,6 +13,8 @@ import (
 
 	"find-ten-game/internal/api"
 	"find-ten-game/internal/leaderboard"
+	"find-ten-game/internal/player"
+	"find-ten-game/internal/sqlitedb"
 )
 
 const shutdownTimeout = 5 * time.Second
@@ -20,21 +22,35 @@ const databaseInitTimeout = 5 * time.Second
 
 func main() {
 	addr := flag.String("addr", ":8080", "server listen address")
-	dbPath := flag.String("db-path", "./data/find-ten.db", "SQLite leaderboard database path")
+	dbPath := flag.String("db-path", "./data/find-ten.db", "SQLite database path")
 	flag.Parse()
 
 	dbCtx, dbCancel := context.WithTimeout(context.Background(), databaseInitTimeout)
 	defer dbCancel()
-	leaderboardStore, err := leaderboard.Open(dbCtx, *dbPath)
+
+	db, err := sqlitedb.Open(dbCtx, *dbPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "database error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "open database error: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() {
-		if err := leaderboardStore.Close(); err != nil {
+		if err := db.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "database close error: %v\n", err)
 		}
 	}()
+
+	// Step 35B initializes the player schema here. Later account API work will
+	// keep and pass this store as a server dependency.
+	if _, err := player.NewStore(dbCtx, db); err != nil {
+		fmt.Fprintf(os.Stderr, "player store error: %v\n", err)
+		os.Exit(1)
+	}
+
+	leaderboardStore, err := leaderboard.NewStore(dbCtx, db)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "leaderboard store error: %v\n", err)
+		os.Exit(1)
+	}
 
 	server := api.NewServer(leaderboardStore)
 	fmt.Fprintf(os.Stdout, "listening on %s\n", *addr)

@@ -204,7 +204,9 @@ Handlers must call `GameSession` APIs instead of calling lower-level game functi
 
 ## API Endpoints
 
-The API currently exposes:
+The API endpoint surface includes current gameplay and score routes plus the Step 35 account routes.
+
+Current gameplay and score endpoints:
 
 - `GET /health`
 - `POST /games`
@@ -214,6 +216,15 @@ The API currently exposes:
 - `POST /games/{id}/reshuffle`
 - `POST /games/{id}/hint`
 - `POST /games/{id}/remove-number`
+- `POST /scores`
+- `GET /scores`
+
+Step 35 account endpoints:
+
+- `POST /players`
+- `POST /auth/login`
+- `POST /auth/logout`
+- `GET /auth/me`
 
 ### Create Game
 
@@ -282,6 +293,8 @@ The leaderboard repository can:
 - enforce repository-level storage sanity checks for non-negative scores, remaining time bounds, supported board size and duration, and player-name characters
 
 The leaderboard repository does not validate live game status. A later API step must derive score, board size, duration, and remaining time from backend-owned game session state before calling the repository. Player names are intentionally limited to ASCII letters, digits, spaces, hyphen, underscore, and apostrophe for the first persisted leaderboard implementation.
+
+Step 35 extends leaderboard persistence with nullable account linkage. Score rows continue to store the `player_name` snapshot used by the global leaderboard, and logged-in score submissions also store `player_id` for future account-owned score history, achievements, and unlockables. Guest score rows keep `player_id` as `NULL`.
 
 ### Abandon Game
 
@@ -388,6 +401,26 @@ Successful remove-number responses are acknowledgements only:
 The response does not include a snapshot. Updated board state is delivered through the SSE snapshot stream.
 
 The skill sets one selected non-zero cell to `0`, does not award score, rebuilds valid moves, and can be used only once per session. Rejected attempts do not consume the remaining skill use. Out-of-bounds positions and already-cleared target cells return `400 Bad Request`; already-used submissions return `422 Unprocessable Entity`; game-over submissions return `409 Conflict`; closed sessions return `410 Gone`.
+
+## Player Accounts And Authentication
+
+Step 35 adds persistent player accounts as an optional identity layer over the existing game and leaderboard flows. Login is not required to play, and login is not required to submit a score.
+
+Player accounts, browser sessions, and leaderboard scores use the same SQLite database file. The repositories remain separated by domain: leaderboard code owns score storage, and player-account code owns account and session storage. Production should share one opened database connection or shared SQLite open helper so account and score repositories do not independently manage unrelated connections to the same file.
+
+Players have two account identity fields:
+- `display_name`, shown in the UI and on score rows
+- `account_handle`, a unique login identifier returned after registration
+
+Display names are not unique and cannot be used for login. The server generates account handles from the requested display name, using the unsuffixed display name when available and a generated suffix when a collision occurs. Handle uniqueness is enforced by a database unique constraint.
+
+Passwords are hashed with `golang.org/x/crypto/bcrypt`. The database stores only the bcrypt hash string, which includes the algorithm marker, work factor, salt, and hash output. The application must not add a separate password-salt column for bcrypt. Password validation rejects inputs shorter than the account minimum and rejects inputs over bcrypt's 72-byte limit.
+
+Login creates a 7-day browser session. The browser receives only an opaque random session token in the `find_ten_session` cookie. SQLite stores only a SHA-256 hash of that token because the token is random high-entropy data. Cookies are `HttpOnly`, `SameSite=Lax`, `Path=/`, and use `Secure` only when served over HTTPS so local HTTP development keeps working.
+
+Expired sessions do not authenticate requests. Session lookup may delete expired rows opportunistically. Logout deletes the current session row when one exists and clears the browser cookie, but it still succeeds when the request is already unauthenticated.
+
+Authenticated score submission changes only the identity source. If a valid session cookie is present, the API derives `player_id` and `player_name` from the authenticated player and ignores any browser-sent `playerName`. If no valid session exists, score submission remains the existing guest flow and requires a request `playerName`.
 
 ## Frontend
 

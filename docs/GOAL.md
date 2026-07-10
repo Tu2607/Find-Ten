@@ -12,7 +12,7 @@ The game:
 - supports one-use helper skills
 - ends when time expires, no valid moves remain, or the board is fully cleared
 
-## Current Implemented Scope
+## Current Scope
 
 Implemented gameplay:
 - board sizes `9x9`, `10x10`, and `11x11`
@@ -34,10 +34,19 @@ Implemented delivery surfaces:
 - configurable board font in the WebUI
 - Dockerized server deployment
 
+Implemented persistence:
+- SQLite-backed global leaderboard score storage
+
+Step 35 account foundation work:
+- optional player accounts with password login
+- 7-day browser sessions
+- account-linked score identity for logged-in submissions
+
 Out of scope for the current game:
 - multiplayer
 - collapse/refill behavior
-- persisted accounts, scores, or settings
+- persistent settings
+- personal score history
 - unlockable progression
 
 Permanently excluded:

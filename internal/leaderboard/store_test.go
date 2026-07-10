@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"find-ten-game/internal/sqlitedb"
 )
 
 var testNow = time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
@@ -80,6 +82,121 @@ func TestOpenReusesExistingDatabase(t *testing.T) {
 	}
 	if scores[0].GameID != submission.GameID {
 		t.Fatalf("score GameID = %q, want %q", scores[0].GameID, submission.GameID)
+	}
+}
+
+func TestOpenRejectsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := Open(ctx, filepath.Join(t.TempDir(), "scores.db"))
+	if err == nil {
+		t.Fatal("Open succeeded, want error")
+	}
+}
+
+func TestOpenStoreCloseClosesOwnedDatabase(t *testing.T) {
+	store, err := open(context.Background(), filepath.Join(t.TempDir(), "scores.db"), testClock)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	db := store.db
+
+	closeStore(t, store)
+
+	if err := db.QueryRowContext(context.Background(), `SELECT 1`).Scan(new(int)); err == nil {
+		t.Fatal("query after Close succeeded, want owned database to be closed")
+	}
+}
+
+func TestNewStoreIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	db, err := sqlitedb.Open(ctx, filepath.Join(t.TempDir(), "scores.db"))
+	if err != nil {
+		t.Fatalf("sqlitedb.Open failed: %v", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("database Close failed: %v", err)
+		}
+	}()
+
+	store, err := NewStore(ctx, db)
+	if err != nil {
+		t.Fatalf("first NewStore failed: %v", err)
+	}
+	submission := testSubmission("game-1", "Ada", 1200, 10, 120, 2000, time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC))
+	if err := store.SubmitScore(ctx, submission); err != nil {
+		t.Fatalf("SubmitScore failed: %v", err)
+	}
+
+	reinitialized, err := NewStore(ctx, db)
+	if err != nil {
+		t.Fatalf("second NewStore failed: %v", err)
+	}
+	scores, err := reinitialized.TopScores(ctx, TopScoresFilter{GridSize: 10, DurationSeconds: 120})
+	if err != nil {
+		t.Fatalf("TopScores failed: %v", err)
+	}
+	if len(scores) != 1 {
+		t.Fatalf("len(scores) = %d, want 1", len(scores))
+	}
+	if scores[0].GameID != submission.GameID {
+		t.Fatalf("score GameID = %q, want %q", scores[0].GameID, submission.GameID)
+	}
+}
+
+func TestNewStoreRejectsCanceledContext(t *testing.T) {
+	db, err := sqlitedb.Open(context.Background(), filepath.Join(t.TempDir(), "scores.db"))
+	if err != nil {
+		t.Fatalf("sqlitedb.Open failed: %v", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("database Close failed: %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := NewStore(ctx, db); err == nil {
+		t.Fatal("NewStore succeeded, want error")
+	}
+}
+
+func TestNewStoreRejectsNilDatabase(t *testing.T) {
+	if _, err := NewStore(context.Background(), nil); err == nil {
+		t.Fatal("NewStore succeeded, want error")
+	}
+}
+
+func TestNewStoreCloseKeepsSharedDatabaseOpen(t *testing.T) {
+	ctx := context.Background()
+	db, err := sqlitedb.Open(ctx, filepath.Join(t.TempDir(), "scores.db"))
+	if err != nil {
+		t.Fatalf("sqlitedb.Open failed: %v", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("database Close failed: %v", err)
+		}
+	}()
+
+	store, err := NewStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("store Close failed: %v", err)
+	}
+
+	var got int
+	if err := db.QueryRowContext(ctx, `SELECT 1`).Scan(&got); err != nil {
+		t.Fatalf("query after store Close failed: %v", err)
+	}
+	if got != 1 {
+		t.Fatalf("query result = %d, want 1", got)
 	}
 }
 
