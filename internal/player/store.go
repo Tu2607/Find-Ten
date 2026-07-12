@@ -28,6 +28,7 @@ var (
 	ErrInvalidDisplayName        = errors.New("invalid display name")
 	ErrInvalidPassword           = errors.New("invalid password")
 	ErrPlayerNotFound            = errors.New("player not found")
+	ErrSessionNotFound           = errors.New("player session not found")
 	ErrInvalidCredentials        = errors.New("invalid account credentials")
 	ErrHandleGenerationExhausted = errors.New("account handle generation exhausted")
 )
@@ -253,4 +254,20 @@ var schemaStatements = []string{
 			AND datetime(created_at) IS NOT NULL
 		)
 	)`,
+	`CREATE TABLE IF NOT EXISTS player_sessions (
+		token_hash TEXT PRIMARY KEY CHECK (length(token_hash) = 64),
+		player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+		created_at TEXT NOT NULL CHECK (
+			created_at GLOB '????-??-??T*Z'
+			AND datetime(created_at) IS NOT NULL
+		),
+		expires_at TEXT NOT NULL CHECK (
+			expires_at GLOB '????-??-??T*Z'
+			AND datetime(expires_at) IS NOT NULL
+		)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_player_sessions_player_id
+	ON player_sessions (player_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_player_sessions_expires_at
+	ON player_sessions (expires_at)`,
 }

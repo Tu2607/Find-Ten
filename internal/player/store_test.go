@@ -30,6 +30,41 @@ func TestNewStoreCreatesPlayersTable(t *testing.T) {
 	}
 }
 
+func TestNewStoreCreatesPlayerSessionsTableAndIndexes(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+
+	if _, err := NewStore(ctx, db); err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+
+	tests := []struct {
+		objectType string
+		name       string
+	}{
+		{objectType: "table", name: "player_sessions"},
+		{objectType: "index", name: "idx_player_sessions_player_id"},
+		{objectType: "index", name: "idx_player_sessions_expires_at"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var name string
+			if err := db.QueryRowContext(
+				ctx,
+				`SELECT name FROM sqlite_master WHERE type = ? AND name = ?`,
+				test.objectType,
+				test.name,
+			).Scan(&name); err != nil {
+				t.Fatalf("%s lookup failed: %v", test.name, err)
+			}
+			if name != test.name {
+				t.Fatalf("name = %q, want %q", name, test.name)
+			}
+		})
+	}
+}
+
 func TestNewStoreIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
