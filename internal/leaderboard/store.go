@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"find-ten-game/internal/player"
 	"find-ten-game/internal/sqlitedb"
 
 	sqlitedriver "modernc.org/sqlite"
@@ -32,6 +33,7 @@ type Store struct {
 type ScoreSubmission struct {
 	GameID          string
 	PlayerName      string
+	PlayerID        *int64
 	Score           int
 	GridSize        int
 	DurationSeconds int
@@ -93,6 +95,9 @@ func newStore(ctx context.Context, db *sql.DB, now func() time.Time) (*Store, er
 	if db == nil {
 		return nil, fmt.Errorf("new leaderboard store: database is required")
 	}
+	if _, err := player.NewStore(ctx, db); err != nil {
+		return nil, fmt.Errorf("initialize player schema for leaderboard store: %w", err)
+	}
 
 	store := &Store{
 		db:      db,
@@ -119,15 +124,17 @@ func (s *Store) SubmitScore(ctx context.Context, submission ScoreSubmission) err
 		INSERT INTO leaderboard_scores (
 			game_id,
 			player_name,
+			player_id,
 			score,
 			grid_size,
 			duration_seconds,
 			remaining_millis,
 			submitted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		normalized.GameID,
 		normalized.PlayerName,
+		normalized.PlayerID,
 		normalized.Score,
 		normalized.GridSize,
 		normalized.DurationSeconds,
@@ -138,7 +145,7 @@ func (s *Store) SubmitScore(ctx context.Context, submission ScoreSubmission) err
 		switch code, ok := sqliteConstraintCode(err); {
 		case ok && code == sqlite3.SQLITE_CONSTRAINT_UNIQUE:
 			return ErrDuplicateGameID
-		case ok && code == sqlite3.SQLITE_CONSTRAINT_CHECK:
+		case ok && (code == sqlite3.SQLITE_CONSTRAINT_CHECK || code == sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY):
 			return ErrInvalidScoreSubmission
 		}
 		return fmt.Errorf("submit leaderboard score: %w", err)
@@ -211,6 +218,51 @@ func (s *Store) init(ctx context.Context) error {
 			return fmt.Errorf("initialize leaderboard schema: %w", err)
 		}
 	}
+	if err := s.addPlayerIDColumn(ctx); err != nil {
+		return err
+	}
+	for _, statement := range playerScoreIndexStatements {
+		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("initialize leaderboard player index: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (s *Store) addPlayerIDColumn(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(leaderboard_scores)`)
+	if err != nil {
+		return fmt.Errorf("inspect leaderboard schema: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			columnID     int
+			name         string
+			columnType   string
+			notNull      int
+			defaultValue any
+			primaryKey   int
+		)
+		if err := rows.Scan(&columnID, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return fmt.Errorf("scan leaderboard schema: %w", err)
+		}
+		if name == "player_id" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate leaderboard schema: %w", err)
+	}
+
+	if _, err := s.db.ExecContext(ctx, `
+		ALTER TABLE leaderboard_scores
+		ADD COLUMN player_id INTEGER REFERENCES players(id)
+	`); err != nil {
+		return fmt.Errorf("add leaderboard player ID column: %w", err)
+	}
 
 	return nil
 }
@@ -233,6 +285,7 @@ var schemaStatements = []string{
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		game_id TEXT NOT NULL UNIQUE,
 		player_name TEXT NOT NULL,
+		player_id INTEGER REFERENCES players(id),
 		score INTEGER NOT NULL CHECK (score >= 0),
 		grid_size INTEGER NOT NULL CHECK (grid_size > 0),
 		duration_seconds INTEGER NOT NULL CHECK (duration_seconds > 0),
@@ -244,6 +297,19 @@ var schemaStatements = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_leaderboard_scores_rank
 	ON leaderboard_scores (
+		grid_size,
+		duration_seconds,
+		score DESC,
+		remaining_millis DESC,
+		submitted_at ASC,
+		id ASC
+	)`,
+}
+
+var playerScoreIndexStatements = []string{
+	`CREATE INDEX IF NOT EXISTS idx_leaderboard_scores_player
+	ON leaderboard_scores (
+		player_id,
 		grid_size,
 		duration_seconds,
 		score DESC,

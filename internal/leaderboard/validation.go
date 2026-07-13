@@ -35,6 +35,8 @@ func validateSubmission(submission ScoreSubmission, now time.Time) error {
 		return fmt.Errorf("%w: player name must be at most %d characters", ErrInvalidScoreSubmission, MaxPlayerNameLength)
 	case !isSafePlayerName(submission.PlayerName):
 		return fmt.Errorf("%w: player name must include an ASCII letter or digit and use only ASCII letters, digits, spaces, hyphen, underscore, or apostrophe", ErrInvalidScoreSubmission)
+	case submission.PlayerID != nil && *submission.PlayerID <= 0:
+		return fmt.Errorf("%w: player ID must be positive", ErrInvalidScoreSubmission)
 	case game.ValidateBoardSize(submission.GridSize) != nil:
 		return fmt.Errorf("%w: unsupported grid size", ErrInvalidScoreSubmission)
 	case game.ValidateDuration(submission.DurationSeconds) != nil:
