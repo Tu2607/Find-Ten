@@ -12,7 +12,10 @@ import (
 
 	"find-ten-game/internal/game"
 	"find-ten-game/internal/leaderboard"
+	"find-ten-game/internal/player"
 )
+
+const sessionCookieName = "find_ten_session"
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -26,6 +29,100 @@ func handleNotImplemented(w http.ResponseWriter, r *http.Request) {
 
 func handleMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+}
+
+func (s *Server) handleCreatePlayer(w http.ResponseWriter, r *http.Request) {
+	var request createPlayerRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if request.DisplayName == nil {
+		writeError(w, http.StatusBadRequest, "displayName is required")
+		return
+	}
+	if request.Password == nil {
+		writeError(w, http.StatusBadRequest, "password is required")
+		return
+	}
+
+	account, err := s.players.CreateAccount(r.Context(), player.CreateAccountInput{
+		DisplayName: *request.DisplayName,
+		Password:    *request.Password,
+	})
+	if err != nil {
+		writePlayerCreateError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(createPlayerResponse{
+		Created: true,
+		Player:  newPlayerResponse(account),
+	})
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var request loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if request.AccountHandle == nil || *request.AccountHandle == "" {
+		writeError(w, http.StatusBadRequest, "accountHandle is required")
+		return
+	}
+	if request.Password == nil || *request.Password == "" {
+		writeError(w, http.StatusBadRequest, "password is required")
+		return
+	}
+
+	account, err := s.players.Authenticate(r.Context(), *request.AccountHandle, *request.Password)
+	if err != nil {
+		writeLoginError(w, err)
+		return
+	}
+	token, err := s.players.CreateSession(r.Context(), account.ID)
+	if err != nil {
+		writePlayerStorageError(w, err, "failed to create login session")
+		return
+	}
+
+	setSessionCookie(w, r, token)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(authResponse{
+		Authenticated: true,
+		Player:        newPlayerResponse(account),
+	})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(sessionCookieName); err == nil {
+		if err := s.players.DeleteSession(r.Context(), cookie.Value); err != nil {
+			writePlayerStorageError(w, err, "failed to log out")
+			return
+		}
+	}
+
+	clearSessionCookie(w, r)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleCurrentPlayer(w http.ResponseWriter, r *http.Request) {
+	account, err := s.authenticatedPlayer(r)
+	if err != nil {
+		writeCurrentPlayerError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(authResponse{
+		Authenticated: true,
+		Player:        newPlayerResponse(account),
+	})
 }
 
 func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request) {

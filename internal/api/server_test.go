@@ -16,6 +16,8 @@ import (
 
 	"find-ten-game/internal/game"
 	"find-ten-game/internal/leaderboard"
+	"find-ten-game/internal/player"
+	"find-ten-game/internal/sqlitedb"
 )
 
 func TestNewServerReturnsHTTPHandler(t *testing.T) {
@@ -25,29 +27,31 @@ func TestNewServerReturnsHTTPHandler(t *testing.T) {
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 
-	store := newTestLeaderboardStore(t)
-	server, ok := NewServer(store).(*Server)
+	db, err := sqlitedb.Open(context.Background(), filepath.Join(t.TempDir(), "find-ten.db"))
+	if err != nil {
+		t.Fatalf("sqlitedb.Open failed: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("database Close failed: %v", err)
+		}
+	})
+
+	playerStore, err := player.NewStore(context.Background(), db)
+	if err != nil {
+		t.Fatalf("player.NewStore failed: %v", err)
+	}
+	leaderboardStore, err := leaderboard.NewStore(context.Background(), db)
+	if err != nil {
+		t.Fatalf("leaderboard.NewStore failed: %v", err)
+	}
+
+	server, ok := NewServer(leaderboardStore, playerStore).(*Server)
 	if !ok {
 		t.Fatal("NewServer did not return *Server")
 	}
 
 	return server
-}
-
-func newTestLeaderboardStore(t *testing.T) *leaderboard.Store {
-	t.Helper()
-
-	store, err := leaderboard.Open(context.Background(), filepath.Join(t.TempDir(), "leaderboard.db"))
-	if err != nil {
-		t.Fatalf("leaderboard.Open failed: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("leaderboard store Close failed: %v", err)
-		}
-	})
-
-	return store
 }
 
 func TestServerRouteDispatch(t *testing.T) {

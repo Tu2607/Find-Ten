@@ -39,9 +39,8 @@ func main() {
 		}
 	}()
 
-	// Step 35B initializes the player schema here. Later account API work will
-	// keep and pass this store as a server dependency.
-	if _, err := player.NewStore(dbCtx, db); err != nil {
+	playerStore, err := player.NewStore(dbCtx, db)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "player store error: %v\n", err)
 		os.Exit(1)
 	}
@@ -52,7 +51,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	server := api.NewServer(leaderboardStore)
+	server := api.NewServer(leaderboardStore, playerStore)
 	fmt.Fprintf(os.Stdout, "listening on %s\n", *addr)
 	if err := listenAndServe(*addr, server); err != nil {
 		fmt.Fprintf(os.Stderr, "server error: %v\n", err)

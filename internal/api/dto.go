@@ -48,6 +48,31 @@ type submitScoreResponse struct {
 	Accepted bool `json:"accepted"`
 }
 
+type createPlayerRequest struct {
+	DisplayName *string `json:"displayName"`
+	Password    *string `json:"password"`
+}
+
+type loginRequest struct {
+	AccountHandle *string `json:"accountHandle"`
+	Password      *string `json:"password"`
+}
+
+type playerResponse struct {
+	DisplayName   string `json:"displayName"`
+	AccountHandle string `json:"accountHandle"`
+}
+
+type createPlayerResponse struct {
+	Created bool           `json:"created"`
+	Player  playerResponse `json:"player"`
+}
+
+type authResponse struct {
+	Authenticated bool           `json:"authenticated"`
+	Player        playerResponse `json:"player"`
+}
+
 type scoreResponse struct {
 	Rank            int       `json:"rank"`
 	PlayerName      string    `json:"playerName"`

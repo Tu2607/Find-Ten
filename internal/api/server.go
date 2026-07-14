@@ -4,23 +4,29 @@ import (
 	"net/http"
 
 	"find-ten-game/internal/leaderboard"
+	"find-ten-game/internal/player"
 )
 
 type Server struct {
 	mux         *http.ServeMux
 	store       *sessionStore
 	leaderboard *leaderboard.Store
+	players     *player.Store
 }
 
-func NewServer(leaderboardStore *leaderboard.Store) http.Handler {
+func NewServer(leaderboardStore *leaderboard.Store, playerStore *player.Store) http.Handler {
 	if leaderboardStore == nil {
 		panic("leaderboard store is required")
+	}
+	if playerStore == nil {
+		panic("player store is required")
 	}
 
 	server := &Server{
 		mux:         http.NewServeMux(),
 		store:       newSessionStore(),
 		leaderboard: leaderboardStore,
+		players:     playerStore,
 	}
 	server.routes()
 
@@ -51,5 +57,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /scores", handleMethodNotAllowed)
 	s.mux.HandleFunc("PUT /scores", handleMethodNotAllowed)
 	s.mux.HandleFunc("PATCH /scores", handleMethodNotAllowed)
+	s.mux.HandleFunc("POST /players", s.handleCreatePlayer)
+	s.mux.HandleFunc("POST /auth/login", s.handleLogin)
+	s.mux.HandleFunc("POST /auth/logout", s.handleLogout)
+	s.mux.HandleFunc("GET /auth/me", s.handleCurrentPlayer)
 	s.mux.Handle("GET /", http.FileServer(http.Dir("./static/")))
 }
