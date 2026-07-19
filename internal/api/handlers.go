@@ -364,7 +364,13 @@ func (s *Server) handleSubmitScore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "gameId is required")
 		return
 	}
-	if request.PlayerName == nil {
+
+	account, authenticated, err := s.authenticatedPlayerForScore(r)
+	if err != nil {
+		writePlayerStorageError(w, err, "failed to authenticate score submission")
+		return
+	}
+	if !authenticated && request.PlayerName == nil {
 		writeError(w, http.StatusBadRequest, "playerName is required")
 		return
 	}
@@ -395,12 +401,17 @@ func (s *Server) handleSubmitScore(w http.ResponseWriter, r *http.Request) {
 
 	submission := leaderboard.ScoreSubmission{
 		GameID:          *request.GameID,
-		PlayerName:      *request.PlayerName,
 		Score:           snapshot.Score,
 		GridSize:        len(snapshot.Board),
 		DurationSeconds: stored.durationSeconds,
 		RemainingMillis: remainingMillis,
 		SubmittedAt:     time.Now(),
+	}
+	if authenticated {
+		submission.PlayerName = account.DisplayName
+		submission.PlayerID = &account.ID
+	} else {
+		submission.PlayerName = *request.PlayerName
 	}
 
 	if err := s.leaderboard.SubmitScore(r.Context(), submission); err != nil {

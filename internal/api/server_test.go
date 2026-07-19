@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,13 @@ func TestNewServerReturnsHTTPHandler(t *testing.T) {
 }
 
 func newTestServer(t *testing.T) *Server {
+	t.Helper()
+
+	server, _ := newTestServerWithDatabase(t)
+	return server
+}
+
+func newTestServerWithDatabase(t *testing.T) (*Server, *sql.DB) {
 	t.Helper()
 
 	db, err := sqlitedb.Open(context.Background(), filepath.Join(t.TempDir(), "find-ten.db"))
@@ -51,7 +59,7 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatal("NewServer did not return *Server")
 	}
 
-	return server
+	return server, db
 }
 
 func TestServerRouteDispatch(t *testing.T) {

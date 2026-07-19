@@ -25,6 +25,18 @@ func (s *Server) authenticatedPlayer(r *http.Request) (player.Account, error) {
 	return s.players.FindAccountBySessionToken(r.Context(), cookie.Value)
 }
 
+func (s *Server) authenticatedPlayerForScore(r *http.Request) (player.Account, bool, error) {
+	account, err := s.authenticatedPlayer(r)
+	if errors.Is(err, player.ErrSessionNotFound) {
+		return player.Account{}, false, nil
+	}
+	if err != nil {
+		return player.Account{}, false, err
+	}
+
+	return account, true, nil
+}
+
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	now := time.Now()
 	http.SetCookie(w, &http.Cookie{
