@@ -185,6 +185,115 @@ button {
   margin-top: 12px;
 }
 
+.account-panel {
+  width: min(360px, calc(100vw - 64px));
+  margin-top: 18px;
+}
+
+.account-panel__guest,
+.account-panel__signed-in,
+.account-form__actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.account-panel__guest[hidden],
+.account-panel__signed-in[hidden],
+.account-form[hidden],
+.account-success[hidden] {
+  display: none;
+}
+
+.account-panel__guest .chalk-btn--sm,
+.account-panel__signed-in .chalk-btn--sm,
+.account-form__actions .chalk-btn--sm {
+  min-width: 132px;
+}
+
+.account-panel__signed-in {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.account-panel__identity {
+  margin: 0;
+  color: #ffe680;
+  font-size: clamp(18px, 2.2vw, 24px);
+  text-align: center;
+}
+
+.account-form,
+.account-success {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: min(320px, 100%);
+}
+
+.account-form__heading {
+  margin: 0 0 2px;
+  color: #ffe680;
+  font-size: clamp(24px, 3vw, 30px);
+  text-align: center;
+}
+
+.account-form__label {
+  font-size: clamp(16px, 2vw, 20px);
+  opacity: 0.72;
+}
+
+.account-form__input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  font: inherit;
+  font-size: clamp(18px, 2.2vw, 22px);
+  outline: none;
+}
+
+.account-form__input:focus {
+  border-color: #ffe680;
+  box-shadow: 0 0 0 2px rgba(255, 230, 128, 0.18);
+}
+
+.account-form__error {
+  min-height: 1.2em;
+  margin: 0;
+  color: #ffb4a8;
+  font-size: clamp(15px, 1.8vw, 18px);
+  line-height: 1.2;
+  text-align: center;
+}
+
+.account-success {
+  align-items: center;
+  text-align: center;
+}
+
+.account-success__message,
+.account-success__handle {
+  margin: 0;
+}
+
+.account-success__message {
+  color: #ffe680;
+  font-size: clamp(22px, 2.8vw, 28px);
+  font-weight: 700;
+}
+
+.account-success__handle {
+  overflow-wrap: anywhere;
+  font-size: clamp(18px, 2.2vw, 22px);
+}
+
 /* Chalk formulas background */
 .chalk-formulas {
   position: absolute;
@@ -728,6 +837,14 @@ button {
   gap: 0;
 }
 
+.overlay__popup--account {
+  width: min(420px, calc(100vw - 48px));
+}
+
+.overlay__popup--account .overlay__underline {
+  margin-bottom: 16px;
+}
+
 .score-submit-form {
   width: min(320px, 100%);
   display: flex;
@@ -762,6 +879,12 @@ button {
 .score-submit-form__input:focus {
   border-color: #ffe680;
   box-shadow: 0 0 0 2px rgba(255, 230, 128, 0.18);
+}
+
+.score-submit-form__input--account {
+  color: #ffe680;
+  background: rgba(255, 230, 128, 0.1);
+  cursor: default;
 }
 
 .score-submit-form__error {
@@ -856,5 +979,15 @@ button {
     min-width: 160px;
     font-size: 20px;
     padding: 10px 24px;
+  }
+
+  .account-panel {
+    width: min(360px, calc(100vw - 44px));
+  }
+
+  .account-panel__guest .chalk-btn--sm,
+  .account-panel__signed-in .chalk-btn--sm,
+  .account-form__actions .chalk-btn--sm {
+    min-width: 118px;
   }
 }

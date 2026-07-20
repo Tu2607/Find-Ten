@@ -36,6 +36,11 @@ const state = {
   leaderboardLoading: false,
   leaderboardError: false,
   leaderboardRequestId: 0,
+  player: null,
+  accountView: "guest",
+  registrationHandle: "",
+  authRequestPending: false,
+  authStateVersion: 0,
   errorTimer: null
 };
 
@@ -60,6 +65,7 @@ const hintButtonEl = document.getElementById("hintButton");
 const colorSwatches = document.querySelectorAll(".color-swatches .swatch");
 const validBoardColors = new Set(["green", "blue", "red", "purple"]);
 const scoreRequestTimeoutMs = 10000;
+const httpStatusUnauthorized = 401;
 
 // Game over overlay elements
 const gameOverOverlay = document.getElementById("gameOverOverlay");
@@ -69,10 +75,32 @@ const submitScoreOpenButtonEl = document.getElementById("submitScoreOpenButton")
 const scoreSubmittedStatusEl = document.getElementById("scoreSubmittedStatus");
 const scoreSubmissionOverlay = document.getElementById("scoreSubmissionOverlay");
 const scoreSubmissionFormEl = document.getElementById("scoreSubmissionForm");
+const playerNameLabelEl = document.getElementById("playerNameLabel");
 const playerNameInputEl = document.getElementById("playerNameInput");
 const submitScoreButtonEl = document.getElementById("submitScoreButton");
 const cancelScoreSubmitButtonEl = document.getElementById("cancelScoreSubmitButton");
 const scoreSubmitErrorEl = document.getElementById("scoreSubmitError");
+
+// Account elements
+const guestAccountActionsEl = document.getElementById("guestAccountActions");
+const signedInAccountActionsEl = document.getElementById("signedInAccountActions");
+const accountDisplayNameEl = document.getElementById("accountDisplayName");
+const showLoginButtonEl = document.getElementById("showLoginButton");
+const showRegisterButtonEl = document.getElementById("showRegisterButton");
+const logoutButtonEl = document.getElementById("logoutButton");
+const loginFormEl = document.getElementById("loginForm");
+const loginHandleInputEl = document.getElementById("loginHandleInput");
+const loginPasswordInputEl = document.getElementById("loginPasswordInput");
+const loginErrorEl = document.getElementById("loginError");
+const loginSubmitButtonEl = document.getElementById("loginSubmitButton");
+const registrationFormEl = document.getElementById("registrationForm");
+const registrationDisplayNameInputEl = document.getElementById("registrationDisplayNameInput");
+const registrationPasswordInputEl = document.getElementById("registrationPasswordInput");
+const registrationErrorEl = document.getElementById("registrationError");
+const registrationSubmitButtonEl = document.getElementById("registrationSubmitButton");
+const registrationSuccessEl = document.getElementById("registrationSuccess");
+const registrationHandleEl = document.getElementById("registrationHandle");
+const accountOverlayEl = document.getElementById("accountOverlay");
 
 // Screen navigation
 const playButtonEl = document.getElementById("playButton");
@@ -97,6 +125,19 @@ document.getElementById("leaderboardButton").addEventListener("click", () => {
 document.getElementById("leaderboardBackButton").addEventListener("click", () => {
   showScreen("welcome");
 });
+
+showLoginButtonEl.addEventListener("click", () => showAccountView("login"));
+showRegisterButtonEl.addEventListener("click", () => showAccountView("register"));
+document.getElementById("loginCancelButton").addEventListener("click", () => showAccountView("guest"));
+document.getElementById("registrationCancelButton").addEventListener("click", () => showAccountView("guest"));
+document.getElementById("registrationLoginButton").addEventListener("click", () => {
+  showAccountView("login");
+  loginHandleInputEl.value = state.registrationHandle;
+  loginPasswordInputEl.focus();
+});
+loginFormEl.addEventListener("submit", submitLogin);
+registrationFormEl.addEventListener("submit", submitRegistration);
+logoutButtonEl.addEventListener("click", logout);
 
 colorSwatches.forEach((swatch) => {
   swatch.addEventListener("click", () => {
@@ -204,12 +245,278 @@ scoreSubmissionFormEl.addEventListener("submit", submitScore);
   }
 })();
 
+renderAccountState();
+restoreAuthenticatedPlayer();
+
 function showScreen(name) {
   hideError();
+  if (name !== "welcome" && state.accountView !== "guest") {
+    state.accountView = "guest";
+    renderAccountState();
+  }
   welcomeScreen.hidden = name !== "welcome";
   settingsScreen.hidden = name !== "settings";
   leaderboardScreen.hidden = name !== "leaderboard";
   gameScreen.hidden = name !== "game";
+}
+
+function showAccountView(view) {
+  if (state.player) {
+    state.accountView = "guest";
+  } else {
+    state.accountView = view;
+  }
+  hideLoginError();
+  hideRegistrationError();
+  renderAccountState();
+
+  if (state.accountView === "login") {
+    loginHandleInputEl.focus();
+  } else if (state.accountView === "register") {
+    registrationDisplayNameInputEl.focus();
+  }
+}
+
+function renderAccountState() {
+  const authenticated = state.player !== null;
+  const accountOverlayVisible = !authenticated && state.accountView !== "guest";
+  guestAccountActionsEl.hidden = authenticated || state.accountView !== "guest";
+  signedInAccountActionsEl.hidden = !authenticated;
+  accountOverlayEl.hidden = !accountOverlayVisible;
+  loginFormEl.hidden = authenticated || state.accountView !== "login";
+  registrationFormEl.hidden = authenticated || state.accountView !== "register";
+  registrationSuccessEl.hidden = authenticated || state.accountView !== "registration-success";
+  accountDisplayNameEl.textContent = authenticated ? state.player.displayName : "";
+  registrationHandleEl.textContent = state.registrationHandle ? `Account handle: ${state.registrationHandle}` : "";
+  updateAuthControls();
+}
+
+function updateAuthControls() {
+  const pending = state.authRequestPending;
+  loginHandleInputEl.disabled = pending;
+  loginPasswordInputEl.disabled = pending;
+  loginSubmitButtonEl.disabled = pending;
+  registrationDisplayNameInputEl.disabled = pending;
+  registrationPasswordInputEl.disabled = pending;
+  registrationSubmitButtonEl.disabled = pending;
+  logoutButtonEl.disabled = pending;
+  loginSubmitButtonEl.textContent = pending && state.accountView === "login" ? "Logging In" : "Log In";
+  registrationSubmitButtonEl.textContent = pending && state.accountView === "register" ? "Creating" : "Create";
+}
+
+async function restoreAuthenticatedPlayer() {
+  const authStateVersion = state.authStateVersion;
+  let response;
+  try {
+    response = await fetchWithTimeout("/auth/me", { credentials: "same-origin" });
+  } catch {
+    return;
+  }
+
+  if (response.status === httpStatusUnauthorized) {
+    return;
+  }
+  if (!response.ok) {
+    return;
+  }
+
+  const result = await readJSON(response);
+  if (!result || !result.authenticated || !isPlayer(result.player)) {
+    return;
+  }
+  if (authStateVersion !== state.authStateVersion || state.player !== null) {
+    return;
+  }
+
+  setAuthenticatedPlayer(result.player);
+}
+
+async function submitLogin(event) {
+  event.preventDefault();
+  if (state.authRequestPending) return;
+
+  const accountHandle = loginHandleInputEl.value.trim();
+  const password = loginPasswordInputEl.value;
+  if (!accountHandle || !password) {
+    showLoginError("Enter your account handle and password.");
+    return;
+  }
+
+  state.authRequestPending = true;
+  hideLoginError();
+  updateAuthControls();
+
+  let response;
+  try {
+    response = await fetchWithTimeout("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ accountHandle, password })
+    });
+  } catch (err) {
+    state.authRequestPending = false;
+    updateAuthControls();
+    showLoginError(err && err.name === "AbortError" ? "Request timed out. Try again." : "Could not log in. Check your connection.");
+    return;
+  }
+
+  const result = response.ok ? await readJSON(response) : null;
+  state.authRequestPending = false;
+  updateAuthControls();
+  if (!response.ok || !result || !result.authenticated || !isPlayer(result.player)) {
+    showLoginError(loginErrorMessage(response.status));
+    return;
+  }
+
+  loginFormEl.reset();
+  setAuthenticatedPlayer(result.player);
+}
+
+async function submitRegistration(event) {
+  event.preventDefault();
+  if (state.authRequestPending) return;
+
+  const displayName = registrationDisplayNameInputEl.value.trim();
+  const password = registrationPasswordInputEl.value;
+  if (!displayName || !password) {
+    showRegistrationError("Enter a display name and password.");
+    return;
+  }
+
+  state.authRequestPending = true;
+  hideRegistrationError();
+  updateAuthControls();
+
+  let response;
+  try {
+    response = await fetchWithTimeout("/players", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ displayName, password })
+    });
+  } catch (err) {
+    state.authRequestPending = false;
+    updateAuthControls();
+    showRegistrationError(err && err.name === "AbortError" ? "Request timed out. Try again." : "Could not create the account. Check your connection.");
+    return;
+  }
+
+  const result = response.ok ? await readJSON(response) : null;
+  state.authRequestPending = false;
+  updateAuthControls();
+  if (!response.ok || !result || !result.created || !isPlayer(result.player)) {
+    showRegistrationError(registrationErrorMessage(response.status));
+    return;
+  }
+
+  state.registrationHandle = result.player.accountHandle;
+  state.accountView = "registration-success";
+  registrationFormEl.reset();
+  renderAccountState();
+}
+
+async function logout() {
+  if (state.authRequestPending) return;
+
+  state.authRequestPending = true;
+  updateAuthControls();
+  let response;
+  try {
+    response = await fetchWithTimeout("/auth/logout", {
+      method: "POST",
+      credentials: "same-origin"
+    });
+  } catch {
+    state.authRequestPending = false;
+    updateAuthControls();
+    showError("Could not log out. Check your connection.");
+    return;
+  }
+
+  state.authRequestPending = false;
+  if (!response.ok) {
+    if (response.status === httpStatusUnauthorized) {
+      clearAuthenticatedPlayer();
+      showError("Session expired.");
+    } else {
+      updateAuthControls();
+      showError("Could not log out. Try again.");
+    }
+    return;
+  }
+
+  clearAuthenticatedPlayer();
+}
+
+function clearAuthenticatedPlayer() {
+  state.player = null;
+  state.accountView = "guest";
+  state.registrationHandle = "";
+  state.authStateVersion++;
+  renderAccountState();
+  syncScoreSubmissionIdentity();
+}
+
+function setAuthenticatedPlayer(player) {
+  state.player = player;
+  state.accountView = "guest";
+  state.registrationHandle = "";
+  state.authStateVersion++;
+  renderAccountState();
+  syncScoreSubmissionIdentity();
+}
+
+function isPlayer(value) {
+  return value &&
+    typeof value.displayName === "string" && value.displayName.trim() !== "" &&
+    typeof value.accountHandle === "string" && value.accountHandle.trim() !== "";
+}
+
+async function readJSON(response) {
+  if (!(response.headers.get("Content-Type") || "").toLowerCase().includes("application/json")) {
+    return null;
+  }
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function loginErrorMessage(status) {
+  if (status === httpStatusUnauthorized) return "Account handle or password is incorrect.";
+  if (status === 400) return "Enter your account handle and password.";
+  if (status === 408) return "Request timed out. Try again.";
+  return status >= 500 ? "Server error. Try again." : "Could not log in. Try again.";
+}
+
+function registrationErrorMessage(status) {
+  if (status === 400) return "Check the display name and password.";
+  if (status === 408) return "Request timed out. Try again.";
+  if (status === 503) return "Could not create the account. Try again.";
+  return status >= 500 ? "Server error. Try again." : "Could not create the account. Try again.";
+}
+
+function showLoginError(message) {
+  loginErrorEl.textContent = message;
+  loginErrorEl.hidden = false;
+}
+
+function hideLoginError() {
+  loginErrorEl.textContent = "";
+  loginErrorEl.hidden = true;
+}
+
+function showRegistrationError(message) {
+  registrationErrorEl.textContent = message;
+  registrationErrorEl.hidden = false;
+}
+
+function hideRegistrationError() {
+  registrationErrorEl.textContent = "";
+  registrationErrorEl.hidden = true;
 }
 
 function getSelectedBoardSize() {
@@ -251,17 +558,26 @@ function hideGameOverOverlay() {
   gameOverOverlay.hidden = true;
 }
 
-function showScoreSubmissionOverlay() {
+async function showScoreSubmissionOverlay() {
   if (state.scoreSubmitted) {
     return;
   }
 
   gameOverOverlay.hidden = true;
-  playerNameInputEl.value = "";
   resetScoreSubmissionRequest();
+  syncScoreSubmissionIdentity();
   hideScoreSubmitError();
   scoreSubmissionOverlay.hidden = false;
-  playerNameInputEl.focus();
+  if (state.player) {
+    submitScoreButtonEl.focus();
+  } else {
+    playerNameInputEl.focus();
+  }
+
+  const authenticated = await refreshScoreSubmissionIdentity();
+  if (authenticated === false && !scoreSubmissionOverlay.hidden) {
+    playerNameInputEl.focus();
+  }
 }
 
 function hideScoreSubmissionOverlay() {
@@ -272,7 +588,8 @@ function hideScoreSubmissionOverlay() {
 async function submitScore(event) {
   event.preventDefault();
   const playerName = playerNameInputEl.value.trim();
-  if (!playerName || state.scoreSubmitted || state.scoreSubmitPending) {
+  const authenticated = state.player !== null;
+  if ((!authenticated && !playerName) || state.scoreSubmitted || state.scoreSubmitPending) {
     updateScoreSubmitButton();
     return;
   }
@@ -291,10 +608,15 @@ async function submitScore(event) {
 
   let response;
   try {
+    const body = { gameId };
+    if (!authenticated) {
+      body.playerName = playerName;
+    }
     response = await fetchWithTimeout("/scores", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ gameId, playerName })
+      credentials: "same-origin",
+      body: JSON.stringify(body)
     }, controller);
   } catch (err) {
     if (!scoreSubmissionStillCurrent(gameId)) {
@@ -324,11 +646,60 @@ async function submitScore(event) {
   }
 
   resetScoreSubmissionRequest();
+  if (response.status === 400 && authenticated) {
+    const sessionState = await refreshScoreSubmissionIdentity();
+    if (sessionState === false) {
+      showScoreSubmitError("Session expired. Enter a player name.");
+      return;
+    }
+    showScoreSubmitError("Could not submit score. Try again.");
+    return;
+  }
   showScoreSubmitError(scoreSubmissionErrorMessage(response.status));
 }
 
+function syncScoreSubmissionIdentity() {
+  const authenticated = state.player !== null;
+  playerNameLabelEl.textContent = authenticated ? "Account Name" : "Player Name";
+  playerNameInputEl.readOnly = authenticated;
+  playerNameInputEl.classList.toggle("score-submit-form__input--account", authenticated);
+  playerNameInputEl.placeholder = authenticated ? "" : "Your name";
+  playerNameInputEl.value = authenticated ? state.player.displayName : "";
+  updateScoreSubmitButton();
+}
+
+async function refreshScoreSubmissionIdentity() {
+  const authStateVersion = state.authStateVersion;
+  let response;
+  try {
+    response = await fetchWithTimeout("/auth/me", { credentials: "same-origin" });
+  } catch {
+    return null;
+  }
+
+  if (authStateVersion !== state.authStateVersion) {
+    return null;
+  }
+  if (response.status === httpStatusUnauthorized) {
+    clearAuthenticatedPlayer();
+    return false;
+  }
+  if (!response.ok) {
+    return null;
+  }
+
+  const result = await readJSON(response);
+  if (!result || !result.authenticated || !isPlayer(result.player)) {
+    return null;
+  }
+
+  setAuthenticatedPlayer(result.player);
+  return true;
+}
+
 function updateScoreSubmitButton() {
-  submitScoreButtonEl.disabled = playerNameInputEl.value.trim() === "" || state.scoreSubmitted || state.scoreSubmitPending;
+  const hasIdentity = state.player !== null || playerNameInputEl.value.trim() !== "";
+  submitScoreButtonEl.disabled = !hasIdentity || state.scoreSubmitted || state.scoreSubmitPending;
   submitScoreButtonEl.textContent = state.scoreSubmitPending ? "Submitting" : "Submit";
   playerNameInputEl.disabled = state.scoreSubmitPending;
   cancelScoreSubmitButtonEl.disabled = false;
