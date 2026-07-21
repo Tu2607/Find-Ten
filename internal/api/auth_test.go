@@ -16,7 +16,7 @@ import (
 
 func TestCreatePlayer(t *testing.T) {
 	server := newTestServer(t)
-	request := httptest.NewRequest(http.MethodPost, "/players", strings.NewReader(`{"displayName":"Ada","password":"correct-password"}`))
+	request := httptest.NewRequest(http.MethodPost, "/players", strings.NewReader(`{"displayName":"Ada","password":"Correct-password"}`))
 	response := httptest.NewRecorder()
 
 	server.ServeHTTP(response, request)
@@ -49,10 +49,12 @@ func TestCreatePlayerRejectsInvalidRequests(t *testing.T) {
 		body string
 	}{
 		{name: "invalid JSON", body: `{`},
-		{name: "missing display name", body: `{"password":"correct-password"}`},
+		{name: "missing display name", body: `{"password":"Correct-password"}`},
 		{name: "missing password", body: `{"displayName":"Ada"}`},
-		{name: "invalid display name", body: `{"displayName":"Al","password":"correct-password"}`},
+		{name: "invalid display name", body: `{"displayName":"Al","password":"Correct-password"}`},
 		{name: "invalid password", body: `{"displayName":"Ada","password":"short"}`},
+		{name: "password without ASCII special character", body: `{"displayName":"Ada","password":"Abcdef123456"}`},
+		{name: "password without ASCII uppercase letter", body: `{"displayName":"Ada","password":"abcdef12345!"}`},
 	}
 
 	for _, test := range tests {
@@ -68,9 +70,37 @@ func TestCreatePlayerRejectsInvalidRequests(t *testing.T) {
 	}
 }
 
+func TestCreatePlayerPasswordValidationErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		password string
+		wantBody string
+	}{
+		{name: "missing ASCII special character", password: "Abcdef123456", wantBody: "invalid password: password must include an ASCII special character"},
+		{name: "missing ASCII uppercase letter", password: "abcdef12345!", wantBody: "invalid password: password must include an ASCII uppercase letter"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := newTestServer(t)
+			request := httptest.NewRequest(http.MethodPost, "/players", strings.NewReader(`{"displayName":"Ada","password":"`+test.password+`"}`))
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+			}
+			if body := strings.TrimSpace(response.Body.String()); body != test.wantBody {
+				t.Fatalf("response body = %q, want %q", body, test.wantBody)
+			}
+		})
+	}
+}
+
 func TestCreatePlayerGeneratesSuffixedHandleForDuplicateDisplayName(t *testing.T) {
 	server := newTestServer(t)
-	body := `{"displayName":"Ada","password":"correct-password"}`
+	body := `{"displayName":"Ada","password":"Correct-password"}`
 
 	first := createPlayerRequestForTest(t, server, body)
 	second := createPlayerRequestForTest(t, server, body)
@@ -85,7 +115,7 @@ func TestCreatePlayerGeneratesSuffixedHandleForDuplicateDisplayName(t *testing.T
 func TestLoginSetsSessionCookie(t *testing.T) {
 	server := newTestServer(t)
 	account := createAPIAccount(t, server, "Ada")
-	request := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"accountHandle":"Ada","password":"correct-password"}`))
+	request := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"accountHandle":"Ada","password":"Correct-password"}`))
 	response := httptest.NewRecorder()
 
 	server.ServeHTTP(response, request)
@@ -122,7 +152,7 @@ func TestLoginSetsSessionCookie(t *testing.T) {
 func TestLoginUsesSecureCookieForHTTPS(t *testing.T) {
 	server := newTestServer(t)
 	createAPIAccount(t, server, "Ada")
-	request := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"accountHandle":"Ada","password":"correct-password"}`))
+	request := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"accountHandle":"Ada","password":"Correct-password"}`))
 	request.TLS = &tls.ConnectionState{}
 	response := httptest.NewRecorder()
 
@@ -144,10 +174,10 @@ func TestLoginRejectsInvalidRequestsAndCredentials(t *testing.T) {
 		withAccount bool
 	}{
 		{name: "invalid JSON", body: `{`, wantStatus: http.StatusBadRequest},
-		{name: "missing handle", body: `{"password":"correct-password"}`, wantStatus: http.StatusBadRequest},
+		{name: "missing handle", body: `{"password":"Correct-password"}`, wantStatus: http.StatusBadRequest},
 		{name: "missing password", body: `{"accountHandle":"Ada"}`, wantStatus: http.StatusBadRequest},
 		{name: "wrong password", body: `{"accountHandle":"Ada","password":"wrong-password"}`, wantStatus: http.StatusUnauthorized, withAccount: true},
-		{name: "unknown handle", body: `{"accountHandle":"Unknown","password":"correct-password"}`, wantStatus: http.StatusUnauthorized},
+		{name: "unknown handle", body: `{"accountHandle":"Unknown","password":"Correct-password"}`, wantStatus: http.StatusUnauthorized},
 	}
 
 	for _, test := range tests {
@@ -215,6 +245,26 @@ func TestCurrentPlayerRejectsMissingAndInvalidSessions(t *testing.T) {
 	}
 }
 
+func TestCurrentPlayerRejectsExpiredSession(t *testing.T) {
+	server, db := newTestServerWithDatabase(t)
+	account, token := createAPIAuthenticatedSession(t, server, "Ada")
+	if _, err := db.ExecContext(context.Background(), `
+		UPDATE player_sessions SET expires_at = ? WHERE player_id = ?
+	`, time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), account.ID); err != nil {
+		t.Fatalf("expire session: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestLogoutDeletesCurrentSessionAndClearsCookie(t *testing.T) {
 	server := newTestServer(t)
 	account, currentToken := createAPIAuthenticatedSession(t, server, "Ada")
@@ -264,14 +314,14 @@ func TestAuthHandlersMapCanceledRequestToTimeout(t *testing.T) {
 		{
 			name: "create player",
 			setup: func(_ *testing.T, _ *Server) *http.Request {
-				return httptest.NewRequest(http.MethodPost, "/players", strings.NewReader(`{"displayName":"Ada","password":"correct-password"}`))
+				return httptest.NewRequest(http.MethodPost, "/players", strings.NewReader(`{"displayName":"Ada","password":"Correct-password"}`))
 			},
 		},
 		{
 			name: "login",
 			setup: func(t *testing.T, server *Server) *http.Request {
 				createAPIAccount(t, server, "Ada")
-				return httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"accountHandle":"Ada","password":"correct-password"}`))
+				return httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"accountHandle":"Ada","password":"Correct-password"}`))
 			},
 		},
 		{
@@ -322,7 +372,7 @@ func createAPIAccount(t *testing.T, server *Server, displayName string) player.A
 
 	account, err := server.players.CreateAccount(context.Background(), player.CreateAccountInput{
 		DisplayName: displayName,
-		Password:    "correct-password",
+		Password:    "Correct-password",
 	})
 	if err != nil {
 		t.Fatalf("CreateAccount failed: %v", err)

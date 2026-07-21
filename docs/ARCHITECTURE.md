@@ -414,7 +414,7 @@ Players have two account identity fields:
 
 Display names are not unique and cannot be used for login. The server generates account handles from the requested display name, using the unsuffixed display name when available and a generated suffix when a collision occurs. Handle uniqueness is enforced by a database unique constraint.
 
-Passwords are hashed with `golang.org/x/crypto/bcrypt`. The database stores only the bcrypt hash string, which includes the algorithm marker, work factor, salt, and hash output. The application must not add a separate password-salt column for bcrypt. Password validation rejects inputs shorter than the account minimum and rejects inputs over bcrypt's 72-byte limit.
+Passwords are hashed with `golang.org/x/crypto/bcrypt`. The database stores only the bcrypt hash string, which includes the algorithm marker, work factor, salt, and hash output. The application must not add a separate password-salt column for bcrypt. New-account password validation rejects inputs shorter than the 12-character account minimum, inputs over bcrypt's 72-byte limit, inputs without an ASCII non-alphanumeric, non-whitespace character, and inputs without an ASCII uppercase letter. Login accepts existing bcrypt-safe passwords so later policy changes do not lock out existing accounts.
 
 Login creates a 7-day browser session. The browser receives only an opaque random session token in the `find_ten_session` cookie. SQLite stores only a SHA-256 hash of that token because the token is random high-entropy data. Cookies are `HttpOnly`, `SameSite=Lax`, `Path=/`, and use `Secure` only when served over HTTPS so local HTTP development keeps working.
 

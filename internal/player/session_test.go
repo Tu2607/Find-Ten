@@ -227,7 +227,7 @@ func createTestAccount(t *testing.T, store *Store, displayName string) Account {
 
 	account, err := store.CreateAccount(context.Background(), CreateAccountInput{
 		DisplayName: displayName,
-		Password:    "correct-password",
+		Password:    "Correct-password",
 	})
 	if err != nil {
 		t.Fatalf("CreateAccount failed: %v", err)

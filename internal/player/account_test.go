@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 var accountTestNow = time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
@@ -16,7 +18,7 @@ func TestCreateAccountStoresBcryptHashAndFindsAccount(t *testing.T) {
 
 	account, err := store.CreateAccount(ctx, CreateAccountInput{
 		DisplayName: "  Ada  ",
-		Password:    "correct-password",
+		Password:    "Correct-password",
 	})
 	if err != nil {
 		t.Fatalf("CreateAccount failed: %v", err)
@@ -36,10 +38,10 @@ func TestCreateAccountStoresBcryptHashAndFindsAccount(t *testing.T) {
 	if err := store.db.QueryRowContext(ctx, `SELECT password_hash FROM players WHERE id = ?`, account.ID).Scan(&passwordHash); err != nil {
 		t.Fatalf("password hash lookup failed: %v", err)
 	}
-	if passwordHash == "correct-password" {
+	if passwordHash == "Correct-password" {
 		t.Fatal("password hash stores plaintext password")
 	}
-	if !VerifyPassword(passwordHash, "correct-password") {
+	if !VerifyPassword(passwordHash, "Correct-password") {
 		t.Fatal("stored password hash does not verify")
 	}
 
@@ -56,11 +58,11 @@ func TestCreateAccountSamePasswordUsesDistinctBcryptHashes(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 
-	first, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "correct-password"})
+	first, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "Correct-password"})
 	if err != nil {
 		t.Fatalf("first CreateAccount failed: %v", err)
 	}
-	second, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Grace", Password: "correct-password"})
+	second, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Grace", Password: "Correct-password"})
 	if err != nil {
 		t.Fatalf("second CreateAccount failed: %v", err)
 	}
@@ -80,7 +82,7 @@ func TestCreateAccountSamePasswordUsesDistinctBcryptHashes(t *testing.T) {
 func TestAuthenticate(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	created, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "correct-password"})
+	created, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "Correct-password"})
 	if err != nil {
 		t.Fatalf("CreateAccount failed: %v", err)
 	}
@@ -91,10 +93,11 @@ func TestAuthenticate(t *testing.T) {
 		password string
 		wantErr  error
 	}{
-		{name: "correct password", handle: "Ada", password: "correct-password"},
+		{name: "correct password", handle: "Ada", password: "Correct-password"},
 		{name: "wrong password", handle: "Ada", password: "wrong-password", wantErr: ErrInvalidCredentials},
-		{name: "unknown handle", handle: "Unknown", password: "correct-password", wantErr: ErrInvalidCredentials},
-		{name: "case-variant handle", handle: "ada", password: "correct-password", wantErr: ErrInvalidCredentials},
+		{name: "unknown handle", handle: "Unknown", password: "Correct-password", wantErr: ErrInvalidCredentials},
+		{name: "case-variant handle", handle: "ada", password: "Correct-password", wantErr: ErrInvalidCredentials},
+		{name: "empty password", handle: "Ada", password: "", wantErr: ErrInvalidCredentials},
 		{name: "invalid password", handle: "Ada", password: "short", wantErr: ErrInvalidCredentials},
 		{name: "oversized password", handle: "Ada", password: strings.Repeat("a", MaxPasswordBytes+1), wantErr: ErrInvalidCredentials},
 	}
@@ -109,6 +112,28 @@ func TestAuthenticate(t *testing.T) {
 				t.Fatalf("Authenticate account = %#v, want %#v", account, created)
 			}
 		})
+	}
+}
+
+func TestAuthenticateAcceptsLegacyPasswordWithoutASCIICharacter(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	password := "12345678"
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword failed: %v", err)
+	}
+	created, err := store.insertAccount(ctx, "Ada", "Ada", string(passwordHash))
+	if err != nil {
+		t.Fatalf("insertAccount failed: %v", err)
+	}
+
+	account, err := store.Authenticate(ctx, "Ada", password)
+	if err != nil {
+		t.Fatalf("Authenticate failed: %v", err)
+	}
+	if account != created {
+		t.Fatalf("Authenticate account = %#v, want %#v", account, created)
 	}
 }
 
@@ -130,15 +155,15 @@ func TestCreateAccountGeneratesUniqueHandlesAfterCollision(t *testing.T) {
 		return value, nil
 	}
 
-	first, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "correct-password"})
+	first, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "Correct-password"})
 	if err != nil {
 		t.Fatalf("first CreateAccount failed: %v", err)
 	}
-	second, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "correct-password"})
+	second, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "Correct-password"})
 	if err != nil {
 		t.Fatalf("second CreateAccount failed: %v", err)
 	}
-	third, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "correct-password"})
+	third, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "Correct-password"})
 	if err != nil {
 		t.Fatalf("third CreateAccount failed: %v", err)
 	}
@@ -159,7 +184,7 @@ func TestCreateAccountReturnsControlledErrorWhenHandleRetriesExhausted(t *testin
 	store := openTestStore(t)
 	store.handleSuffix = func() (string, error) { return "100001", nil }
 
-	if _, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "correct-password"}); err != nil {
+	if _, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "Correct-password"}); err != nil {
 		t.Fatalf("first CreateAccount failed: %v", err)
 	}
 	if _, err := store.db.ExecContext(ctx, `
@@ -169,7 +194,7 @@ func TestCreateAccountReturnsControlledErrorWhenHandleRetriesExhausted(t *testin
 		t.Fatalf("seed colliding handle failed: %v", err)
 	}
 
-	_, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "correct-password"})
+	_, err := store.CreateAccount(ctx, CreateAccountInput{DisplayName: "Ada", Password: "Correct-password"})
 	if !errors.Is(err, ErrHandleGenerationExhausted) {
 		t.Fatalf("CreateAccount error = %v, want %v", err, ErrHandleGenerationExhausted)
 	}
@@ -209,10 +234,14 @@ func TestValidatePassword(t *testing.T) {
 		value string
 		want  error
 	}{
-		{name: "minimum length", value: "12345678"},
-		{name: "multibyte within byte limit", value: strings.Repeat("界", 8)},
+		{name: "minimum length with required characters", value: "A2345678901!"},
+		{name: "multibyte within byte limit", value: strings.Repeat("界", 10) + "A!"},
 		{name: "empty", value: "", want: ErrInvalidPassword},
-		{name: "too short", value: "1234567", want: ErrInvalidPassword},
+		{name: "too short", value: "A234567890!", want: ErrInvalidPassword},
+		{name: "missing ASCII special character", value: "Abcdef123456", want: ErrInvalidPassword},
+		{name: "whitespace is not special", value: "A234567890 ", want: ErrInvalidPassword},
+		{name: "non ASCII punctuation is not special", value: "A234567890！", want: ErrInvalidPassword},
+		{name: "missing ASCII uppercase letter", value: "abcdef12345!", want: ErrInvalidPassword},
 		{name: "over bcrypt byte limit", value: strings.Repeat("a", MaxPasswordBytes+1), want: ErrInvalidPassword},
 	}
 
@@ -234,12 +263,12 @@ func TestHashPasswordRejectsInvalidPassword(t *testing.T) {
 }
 
 func TestVerifyPassword(t *testing.T) {
-	hash, err := HashPassword("correct-password")
+	hash, err := HashPassword("Correct-password")
 	if err != nil {
 		t.Fatalf("HashPassword failed: %v", err)
 	}
 
-	if !VerifyPassword(hash, "correct-password") {
+	if !VerifyPassword(hash, "Correct-password") {
 		t.Fatal("VerifyPassword rejected the correct password")
 	}
 	if VerifyPassword(hash, "wrong-password") {
@@ -253,7 +282,7 @@ func TestVerifyPassword(t *testing.T) {
 func TestCreateAccountTrimsBeforeValidatingDisplayName(t *testing.T) {
 	_, err := openTestStore(t).CreateAccount(context.Background(), CreateAccountInput{
 		DisplayName: "  Ab  ",
-		Password:    "correct-password",
+		Password:    "Correct-password",
 	})
 	if !errors.Is(err, ErrInvalidDisplayName) {
 		t.Fatalf("CreateAccount error = %v, want %v", err, ErrInvalidDisplayName)
@@ -274,7 +303,7 @@ func TestAuthenticatePropagatesStorageErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := openTestStore(t).Authenticate(ctx, "Ada", "correct-password")
+	_, err := openTestStore(t).Authenticate(ctx, "Ada", "Correct-password")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Authenticate error = %v, want %v", err, context.Canceled)
 	}

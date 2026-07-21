@@ -18,7 +18,7 @@ import (
 const (
 	MinDisplayNameLength       = 3
 	MaxDisplayNameLength       = 10
-	MinPasswordLength          = 8
+	MinPasswordLength          = 12
 	MaxPasswordBytes           = 72
 	handleSuffixDigits         = 6
 	maxHandleGenerationRetries = 8
@@ -128,7 +128,7 @@ func (s *Store) FindAccountByHandle(ctx context.Context, accountHandle string) (
 }
 
 func (s *Store) Authenticate(ctx context.Context, accountHandle, password string) (Account, error) {
-	if err := ValidatePassword(password); err != nil {
+	if err := validatePasswordForAuthentication(password); err != nil {
 		return Account{}, ErrInvalidCredentials
 	}
 

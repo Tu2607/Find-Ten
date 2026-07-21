@@ -73,13 +73,13 @@
   <div id="accountOverlay" class="overlay overlay--account" hidden>
     <div class="overlay__scrim"></div>
     <div class="overlay__popup overlay__popup--account" role="dialog" aria-modal="true">
-      <form id="loginForm" class="account-form" hidden>
+      <form id="loginForm" class="account-form" hidden novalidate>
         <h2 class="overlay__reason account-form__heading">Log In</h2>
         <div class="overlay__underline"></div>
         <label class="account-form__label" for="loginHandleInput">Account Handle</label>
-        <input type="text" id="loginHandleInput" class="account-form__input" name="accountHandle" maxlength="17" autocomplete="username" required>
+        <input type="text" id="loginHandleInput" class="account-form__input" name="accountHandle" maxlength="17" autocomplete="username">
         <label class="account-form__label" for="loginPasswordInput">Password</label>
-        <input type="password" id="loginPasswordInput" class="account-form__input" name="password" autocomplete="current-password" required>
+        <input type="password" id="loginPasswordInput" class="account-form__input" name="password" autocomplete="current-password">
         <p class="account-form__error" id="loginError" aria-live="polite" hidden></p>
         <div class="overlay__actions account-form__actions">
           <button type="submit" class="chalk-btn chalk-btn--sm" id="loginSubmitButton">Log In</button>
@@ -87,13 +87,13 @@
         </div>
       </form>
 
-      <form id="registrationForm" class="account-form" hidden>
+      <form id="registrationForm" class="account-form" hidden novalidate>
         <h2 class="overlay__reason account-form__heading">Create Account</h2>
         <div class="overlay__underline"></div>
         <label class="account-form__label" for="registrationDisplayNameInput">Display Name</label>
-        <input type="text" id="registrationDisplayNameInput" class="account-form__input" name="displayName" minlength="3" maxlength="10" autocomplete="nickname" required>
+        <input type="text" id="registrationDisplayNameInput" class="account-form__input" name="displayName" maxlength="10" autocomplete="nickname">
         <label class="account-form__label" for="registrationPasswordInput">Password</label>
-        <input type="password" id="registrationPasswordInput" class="account-form__input" name="password" minlength="8" autocomplete="new-password" required>
+        <input type="password" id="registrationPasswordInput" class="account-form__input" name="password" minlength="12" autocomplete="new-password">
         <p class="account-form__error" id="registrationError" aria-live="polite" hidden></p>
         <div class="overlay__actions account-form__actions">
           <button type="submit" class="chalk-btn chalk-btn--sm" id="registrationSubmitButton">Create</button>

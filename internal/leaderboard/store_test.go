@@ -141,7 +141,7 @@ func TestSubmitScoreStoresOptionalPlayerIDWithoutChangingTopScores(t *testing.T)
 	}
 	account, err := playerStore.CreateAccount(ctx, player.CreateAccountInput{
 		DisplayName: "Ada",
-		Password:    "correct-password",
+		Password:    "Correct-password",
 	})
 	if err != nil {
 		t.Fatalf("CreateAccount failed: %v", err)

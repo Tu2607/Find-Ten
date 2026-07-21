@@ -383,6 +383,14 @@ async function submitRegistration(event) {
     showRegistrationError("Enter a display name and password.");
     return;
   }
+  if (displayName.length < 3) {
+    showRegistrationError("Display name must be at least 3 characters.");
+    return;
+  }
+  if (password.length < 12) {
+    showRegistrationError("Password must be at least 12 characters.");
+    return;
+  }
 
   state.authRequestPending = true;
   hideRegistrationError();
@@ -406,7 +414,11 @@ async function submitRegistration(event) {
   const result = response.ok ? await readJSON(response) : null;
   state.authRequestPending = false;
   updateAuthControls();
-  if (!response.ok || !result || !result.created || !isPlayer(result.player)) {
+  if (!response.ok) {
+    showRegistrationError(registrationErrorMessage(response.status, await readErrorMessage(response)));
+    return;
+  }
+  if (!result || !result.created || !isPlayer(result.player)) {
     showRegistrationError(registrationErrorMessage(response.status));
     return;
   }
@@ -492,11 +504,32 @@ function loginErrorMessage(status) {
   return status >= 500 ? "Server error. Try again." : "Could not log in. Try again.";
 }
 
-function registrationErrorMessage(status) {
-  if (status === 400) return "Check the display name and password.";
+function registrationErrorMessage(status, errorText) {
+  if (status === 400) {
+    switch (errorText) {
+      case "invalid password: password must be at least 12 characters":
+        return "Password must be at least 12 characters.";
+      case "invalid password: password must be at most 72 bytes":
+        return "Password must be at most 72 bytes.";
+      case "invalid password: password must include an ASCII special character":
+        return "Password must include an ASCII special character.";
+      case "invalid password: password must include an ASCII uppercase letter":
+        return "Password must include an ASCII uppercase letter.";
+      default:
+        return "Check the display name and password.";
+    }
+  }
   if (status === 408) return "Request timed out. Try again.";
   if (status === 503) return "Could not create the account. Try again.";
   return status >= 500 ? "Server error. Try again." : "Could not create the account. Try again.";
+}
+
+async function readErrorMessage(response) {
+  try {
+    return (await response.text()).trim();
+  } catch {
+    return "";
+  }
 }
 
 function showLoginError(message) {
