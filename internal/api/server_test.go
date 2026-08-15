@@ -235,6 +235,214 @@ func TestStaticFiles(t *testing.T) {
 	}
 }
 
+func TestDecodeJSONBodyBounds(t *testing.T) {
+	validJSON := `{"size":9}`
+	tests := []struct {
+		name       string
+		body       string
+		wantOK     bool
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:   "exactly at limit",
+			body:   validJSON + strings.Repeat(" ", int(maxJSONBodyBytes)-len(validJSON)),
+			wantOK: true,
+		},
+		{
+			name:       "one byte over limit",
+			body:       validJSON + strings.Repeat(" ", int(maxJSONBodyBytes)+1-len(validJSON)),
+			wantStatus: http.StatusRequestEntityTooLarge,
+			wantBody:   "request body too large\n",
+		},
+		{
+			name:       "valid prefix cannot bypass limit",
+			body:       validJSON + strings.Repeat("x", int(maxJSONBodyBytes)+1-len(validJSON)),
+			wantStatus: http.StatusRequestEntityTooLarge,
+			wantBody:   "request body too large\n",
+		},
+		{
+			name:       "malformed JSON",
+			body:       `{`,
+			wantStatus: http.StatusBadRequest,
+			wantBody:   "invalid JSON\n",
+		},
+		{
+			name:       "second JSON value",
+			body:       `{"size":9} {"size":10}`,
+			wantStatus: http.StatusBadRequest,
+			wantBody:   "invalid JSON\n",
+		},
+		{
+			name:       "trailing non-whitespace content",
+			body:       `{"size":9}xyz`,
+			wantStatus: http.StatusBadRequest,
+			wantBody:   "invalid JSON\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(test.body))
+			response := httptest.NewRecorder()
+			var destination createGameRequest
+
+			ok := decodeJSONBody(response, request, &destination)
+			if ok != test.wantOK {
+				t.Fatalf("decodeJSONBody returned %t, want %t", ok, test.wantOK)
+			}
+			if test.wantOK {
+				if destination.Size == nil || *destination.Size != 9 {
+					t.Fatalf("decoded size = %v, want 9", destination.Size)
+				}
+				return
+			}
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d", response.Code, test.wantStatus)
+			}
+			if body := response.Body.String(); body != test.wantBody {
+				t.Fatalf("response body = %q, want %q", body, test.wantBody)
+			}
+		})
+	}
+}
+
+func TestJSONEndpointsRejectOversizedBodies(t *testing.T) {
+	server := newTestServer(t)
+	created := createGameForTest(t, server, 9)
+	defer created.stored.session.Stop()
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "create player", path: "/players"},
+		{name: "login", path: "/auth/login"},
+		{name: "create game", path: "/games"},
+		{name: "submit move", path: "/games/" + created.response.GameID + "/moves"},
+		{name: "remove number", path: "/games/" + created.response.GameID + "/remove-number"},
+		{name: "submit score", path: "/scores"},
+	}
+	body := `{}` + strings.Repeat(" ", int(maxJSONBodyBytes)+1-len(`{}`))
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(body))
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("status = %d, want %d", response.Code, http.StatusRequestEntityTooLarge)
+			}
+			if body := response.Body.String(); body != "request body too large\n" {
+				t.Fatalf("response body = %q, want %q", body, "request body too large\n")
+			}
+			assertSecurityHeaders(t, response.Header())
+		})
+	}
+}
+
+func TestCreateGameAcceptsBodyAtLimit(t *testing.T) {
+	server := newTestServer(t)
+	validJSON := `{"size":9}`
+	body := validJSON + strings.Repeat(" ", int(maxJSONBodyBytes)-len(validJSON))
+	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(body))
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusCreated)
+	}
+	stopCreatedGame(t, server, response)
+}
+
+func TestOversizedMoveBodiesForUnknownGamesReturnNotFound(t *testing.T) {
+	server := newTestServer(t)
+	body := `{}` + strings.Repeat(" ", int(maxJSONBodyBytes)+1-len(`{}`))
+	paths := []string{
+		"/games/missing/moves",
+		"/games/missing/remove-number",
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
+			}
+			if body := response.Body.String(); body != "game not found\n" {
+				t.Fatalf("response body = %q, want %q", body, "game not found\n")
+			}
+			assertSecurityHeaders(t, response.Header())
+		})
+	}
+}
+
+func TestSecurityHeadersOnResponses(t *testing.T) {
+	t.Chdir("../..")
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name:       "API success",
+			method:     http.MethodGet,
+			path:       "/health",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "application error",
+			method:     http.MethodPost,
+			path:       "/games",
+			body:       `{`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "static not found",
+			method:     http.MethodGet,
+			path:       "/missing-security-test",
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "method not allowed",
+			method:     http.MethodPost,
+			path:       "/health",
+			wantStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:       "static file",
+			method:     http.MethodGet,
+			path:       "/app.js",
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	server := newTestServer(t)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d", response.Code, test.wantStatus)
+			}
+			assertSecurityHeaders(t, response.Header())
+		})
+	}
+}
+
 func TestCreateGame(t *testing.T) {
 	server := newTestServer(t)
 	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(`{"size":9}`))
@@ -1185,6 +1393,7 @@ func TestGameSnapshotsSSEOpensStream(t *testing.T) {
 	if cacheControl := response.Header.Get("Cache-Control"); cacheControl != "no-cache" {
 		t.Fatalf("Cache-Control = %q, want no-cache", cacheControl)
 	}
+	assertSecurityHeaders(t, response.Header)
 
 	assertNoSSELineWithin(t, response.Body, 20*time.Millisecond)
 }
@@ -2111,6 +2320,25 @@ func getScoresForTest(t *testing.T, server *Server, gridSize, duration int) *htt
 
 func scoreJSONForTest(gameID, playerName string) string {
 	return `{"gameId":"` + gameID + `","playerName":"` + playerName + `"}`
+}
+
+func assertSecurityHeaders(t *testing.T, header http.Header) {
+	t.Helper()
+
+	want := map[string]string{
+		"Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'",
+		"X-Content-Type-Options":  "nosniff",
+		"Referrer-Policy":         "no-referrer",
+		"X-Frame-Options":         "DENY",
+	}
+	for name, wantValue := range want {
+		if value := header.Get(name); value != wantValue {
+			t.Errorf("%s = %q, want %q", name, value, wantValue)
+		}
+	}
+	if strings.Contains(header.Get("Content-Security-Policy"), "'unsafe-inline'") {
+		t.Error("Content-Security-Policy contains 'unsafe-inline'")
+	}
 }
 
 func driveGameToOver(t *testing.T, server *Server, created createdGameForTest) {

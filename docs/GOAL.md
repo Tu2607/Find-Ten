@@ -37,10 +37,14 @@ Implemented delivery surfaces:
 Implemented persistence:
 - SQLite-backed global leaderboard score storage
 
-Step 35 account foundation work:
+Implemented account foundation (Step 35):
 - optional player accounts with password login
 - 7-day browser sessions
 - account-linked score identity for logged-in submissions
+
+Implemented HTTP hardening (Step 36):
+- `8 KiB` limits on JSON request bodies
+- Content Security Policy and security headers on application-generated responses
 
 Out of scope for the current game:
 - multiplayer
@@ -48,6 +52,7 @@ Out of scope for the current game:
 - persistent settings
 - personal score history
 - unlockable progression
+- edge deployment hardening, including HTTPS/HSTS and authentication rate limiting
 
 Permanently excluded:
 - arbitrary quadrilateral selection

@@ -232,7 +232,9 @@ scoreSubmissionFormEl.addEventListener("submit", submitScore);
       tries++;
     } while (tries < 40 && (isCenter(top, left) || tooClose(top, left, placed)));
     placed.push({ top, left });
-    span.style.cssText = `top:${top.toFixed(1)}%;left:${left.toFixed(1)}%;transform:rotate(${rot}deg)`;
+    span.style.top = `${top.toFixed(1)}%`;
+    span.style.left = `${left.toFixed(1)}%`;
+    span.style.transform = `rotate(${rot}deg)`;
     container.appendChild(span);
   }
 

@@ -78,7 +78,7 @@ The project keeps prefix sums for now to test the suggested optimization and to 
 
 ## Game Loop
 
-The planned runtime model is a single-owner game loop.
+The runtime model is a single-owner game loop.
 
 One goroutine owns game state and processes runtime signals serially:
 - player action requests
@@ -128,7 +128,7 @@ Timer expiry remains a separate one-shot runtime signal. It is not a player acti
 
 External callers should not read `GameState` directly while the game loop is running. The loop owns game-state mutation and should also own game-state reads that are shared outside the loop.
 
-The project will expose hard-copy `GameSnapshot` values for display and future network responses. A snapshot is a point-in-time view of the authoritative state and must not share mutable backing data with `GameState`. In particular, `Board` must be deep-copied.
+The project exposes hard-copy `GameSnapshot` values for display and network responses. A snapshot is a point-in-time view of the authoritative state and must not share mutable backing data with `GameState`. In particular, `Board` must be deep-copied.
 
 Snapshots are emitted for:
 - initial game start
@@ -150,13 +150,13 @@ The chosen design is actor-style ownership:
 - `RunGame` owns all state reads and writes
 - callers receive snapshots instead of shared mutable state
 
-This design is slightly more structured than direct state reads with a mutex, but it better matches the planned web backend. It gives future move submission, spectator views, replay verification, and multiplayer match loops a single authoritative path for state changes and state views.
+This design is slightly more structured than direct state reads with a mutex, but it matches the web backend. It gives HTTP move submission and future spectator views, replay verification, and multiplayer match loops a single authoritative path for state changes and state views.
 
 The project keeps separate runtime channels for player action requests and timer expiry. Snapshot delivery uses an output channel, but that channel does not manage state; it only carries immutable views produced by the state owner.
 
 ## Game Session Wrapper
 
-The next runtime boundary is a single-game `GameSession`.
+The runtime boundary is a single-game `GameSession`.
 
 `GameSession` is a lifecycle wrapper, not a state owner. It allocates and wires runtime pieces:
 - session context and cancel function
@@ -171,13 +171,13 @@ The next runtime boundary is a single-game `GameSession`.
 
 The timer remains owned by the session lifecycle but has only one job: signal once when the session deadline expires. It does not mutate game state and does not send through the player action request channel.
 
-The session wrapper should expose a small safe API for callers:
+The session wrapper exposes a small safe API for callers:
 - receive snapshots
 - submit player actions with context-aware result waiting
 - stop the session
 - wait for session completion
 
-This keeps CLI, future HTTP handlers, and future WebSocket handlers from manually wiring channels and goroutines. It also creates a natural path to a later manager that can hold multiple sessions without changing the core game loop.
+This keeps CLI and HTTP handlers, as well as future WebSocket handlers, from manually wiring channels and goroutines. The API session store can hold multiple sessions without changing the core game loop.
 
 Multiplayer, session IDs, and API routing are intentionally out of scope for the first `GameSession` step.
 
@@ -202,9 +202,36 @@ The API layer is not responsible for:
 
 Handlers must call `GameSession` APIs instead of calling lower-level game functions such as `ApplyMove`. This preserves the actor-style runtime boundary: `RunGame` remains the only code that mutates live game state after a session starts.
 
+## HTTP Hardening
+
+JSON request bodies are limited to `8 KiB` at the API decoding boundary. The shared decoder wraps
+the request body with `http.MaxBytesReader`, reads the complete bounded body, and unmarshals the
+collected bytes into the endpoint DTO. Reading the complete bounded body ensures that a small
+valid JSON value followed by oversized trailing content cannot bypass the limit. Requests that
+reach JSON decoding return `413 Request Entity Too Large` when the body exceeds the limit, while
+malformed JSON continues to return the existing `400 invalid JSON` response.
+
+Application-generated security response headers are owned by the application because the Content
+Security Policy is coupled to the static frontend served by the same process. `Server.ServeHTTP`
+sets the headers before route dispatch so they cover API successes, API errors,
+ServeMux-generated responses, static files, and SSE streams without wrapping or changing the
+concrete `*Server` handler.
+
+The Content Security Policy allows same-origin scripts, images, and connections, plus the
+documented Google Fonts stylesheet and font origins. It disallows inline script and style,
+embedding, plugins, and base URL changes. The frontend uses individual CSSOM style property
+assignments where dynamic positioning is required rather than loosening the policy with
+`'unsafe-inline'`.
+
+Authentication rate limiting is intentionally deferred to a later edge-deployment step. That step
+must establish the nginx topology and trusted client-address source before selecting a rate-limit
+key. HSTS also belongs with the future HTTPS edge because the current application supports local
+plain-HTTP development. The Go application does not reconstruct client IPs or parse forwarding
+headers.
+
 ## API Endpoints
 
-The API endpoint surface includes current gameplay and score routes plus the Step 35 account routes.
+The API endpoint surface includes gameplay, score, and account routes.
 
 Current gameplay and score endpoints:
 
@@ -219,7 +246,7 @@ Current gameplay and score endpoints:
 - `POST /scores`
 - `GET /scores`
 
-Step 35 account endpoints:
+Account endpoints (introduced in Step 35):
 
 - `POST /players`
 - `POST /auth/login`
@@ -436,7 +463,7 @@ The player can choose between three board cell fonts in the settings screen: Cha
 
 The CLI demo was the first manual testing surface and remains a thin client over `internal/game`.
 
-The CLI is not a separate rules implementation. It is a thin client over `internal/game` and follows the same actor-style ownership model planned for a future web backend.
+The CLI is not a separate rules implementation. It is a thin client over `internal/game` and follows the same actor-style ownership model as the web backend.
 
 The CLI wiring has three channels:
 - an input line channel fed by a scanner goroutine

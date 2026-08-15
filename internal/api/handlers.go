@@ -33,8 +33,7 @@ func handleMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreatePlayer(w http.ResponseWriter, r *http.Request) {
 	var request createPlayerRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+	if !decodeJSONBody(w, r, &request) {
 		return
 	}
 	if request.DisplayName == nil {
@@ -65,8 +64,7 @@ func (s *Server) handleCreatePlayer(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var request loginRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+	if !decodeJSONBody(w, r, &request) {
 		return
 	}
 	if request.AccountHandle == nil || *request.AccountHandle == "" {
@@ -127,8 +125,7 @@ func (s *Server) handleCurrentPlayer(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request) {
 	var request createGameRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+	if !decodeJSONBody(w, r, &request) {
 		return
 	}
 
@@ -208,8 +205,7 @@ func (s *Server) handleSubmitMove(w http.ResponseWriter, r *http.Request) {
 	//   }
 	// }
 	var request submitMoveRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+	if !decodeJSONBody(w, r, &request) {
 		return
 	}
 
@@ -256,8 +252,7 @@ func (s *Server) handleSubmitRemoveNumber(w http.ResponseWriter, r *http.Request
 	}
 
 	var request submitRemoveNumberRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+	if !decodeJSONBody(w, r, &request) {
 		return
 	}
 
@@ -355,8 +350,7 @@ func writeSnapshotEvent(w io.Writer, snapshot snapshotResponse) error {
 
 func (s *Server) handleSubmitScore(w http.ResponseWriter, r *http.Request) {
 	var request submitScoreRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+	if !decodeJSONBody(w, r, &request) {
 		return
 	}
 

@@ -1,2 +1,4 @@
 data/
 data/*.db*
+.codebase-index
+.mcp.json
