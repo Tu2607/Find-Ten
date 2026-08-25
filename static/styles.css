@@ -680,6 +680,7 @@ button {
   font-weight: 900;
   line-height: 1;
   cursor: pointer;
+  touch-action: manipulation;
   transition: background 0.12s;
 }
 
