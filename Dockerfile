@@ -1,4 +1,4 @@
-FROM golang:1.26.4-trixie AS builder
+FROM golang:1.26.6-trixie AS builder
 
 WORKDIR /app
 
@@ -22,5 +22,4 @@ COPY --from=builder /app/static ./static
 EXPOSE 8080
 
 CMD [ "./find-ten", "-db-path", "/app/data/find-ten.db" ]
-
 
