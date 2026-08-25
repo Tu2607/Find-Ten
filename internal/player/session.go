@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -25,6 +26,9 @@ func (s *Store) CreateSession(ctx context.Context, playerID int64) (string, erro
 	tokenHash, ok := hashSessionToken(token)
 	if !ok {
 		return "", errors.New("generated session token is invalid")
+	}
+	if _, err := s.DeleteExpiredSessions(ctx); err != nil {
+		log.Printf("expired player session cleanup failed: %v", err)
 	}
 
 	createdAt := s.now().UTC()

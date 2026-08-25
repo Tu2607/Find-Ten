@@ -171,33 +171,67 @@ func TestCreateSessionRejectsUnknownPlayer(t *testing.T) {
 	}
 }
 
-func TestDeleteExpiredSessions(t *testing.T) {
+func TestCreateSessionDeletesExpiredSessions(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	account := createTestAccount(t, store, "Ada")
-	expiredToken, err := store.CreateSession(ctx, account.ID)
+	expiredAccount := createTestAccount(t, store, "Ada")
+	expiredToken, err := store.CreateSession(ctx, expiredAccount.ID)
 	if err != nil {
 		t.Fatalf("expired CreateSession failed: %v", err)
 	}
 
 	store.now = func() time.Time { return accountTestNow.Add(SessionLifetime + time.Second) }
-	validToken, err := store.CreateSession(ctx, account.ID)
+	validAccount := createTestAccount(t, store, "Grace")
+	validToken, err := store.CreateSession(ctx, validAccount.ID)
 	if err != nil {
 		t.Fatalf("valid CreateSession failed: %v", err)
-	}
-	deleted, err := store.DeleteExpiredSessions(ctx)
-	if err != nil {
-		t.Fatalf("DeleteExpiredSessions failed: %v", err)
-	}
-	if deleted != 1 {
-		t.Fatalf("deleted session count = %d, want 1", deleted)
 	}
 	if _, err := store.FindAccountBySessionToken(ctx, expiredToken); !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("expired session lookup error = %v, want %v", err, ErrSessionNotFound)
 	}
 
-	if _, err := store.FindAccountBySessionToken(ctx, validToken); err != nil {
+	found, err := store.FindAccountBySessionToken(ctx, validToken)
+	if err != nil {
 		t.Fatalf("valid session lookup failed: %v", err)
+	}
+	if found.ID != validAccount.ID {
+		t.Fatalf("valid session account ID = %d, want %d", found.ID, validAccount.ID)
+	}
+}
+
+func TestCreateSessionPreservesUnexpiredSessions(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	firstAccount := createTestAccount(t, store, "Ada")
+	firstToken, err := store.CreateSession(ctx, firstAccount.ID)
+	if err != nil {
+		t.Fatalf("first CreateSession failed: %v", err)
+	}
+
+	store.now = func() time.Time { return accountTestNow.Add(SessionLifetime - time.Second) }
+	secondAccount := createTestAccount(t, store, "Grace")
+	secondToken, err := store.CreateSession(ctx, secondAccount.ID)
+	if err != nil {
+		t.Fatalf("second CreateSession failed: %v", err)
+	}
+
+	for _, test := range []struct {
+		name    string
+		token   string
+		account Account
+	}{
+		{name: "pre-existing session", token: firstToken, account: firstAccount},
+		{name: "new session", token: secondToken, account: secondAccount},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			found, err := store.FindAccountBySessionToken(ctx, test.token)
+			if err != nil {
+				t.Fatalf("FindAccountBySessionToken failed: %v", err)
+			}
+			if found.ID != test.account.ID {
+				t.Fatalf("account ID = %d, want %d", found.ID, test.account.ID)
+			}
+		})
 	}
 }
 

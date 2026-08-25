@@ -37,7 +37,7 @@ func (s *Server) authenticatedPlayerForScore(r *http.Request) (player.Account, b
 	return account, true, nil
 }
 
-func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
+func setSessionCookie(w http.ResponseWriter, token string) {
 	now := time.Now()
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
@@ -46,12 +46,12 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 		Expires:  now.Add(player.SessionLifetime),
 		MaxAge:   int(player.SessionLifetime.Seconds()),
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+func clearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
@@ -59,7 +59,7 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 		Expires:  time.Unix(1, 0),
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	})
 }

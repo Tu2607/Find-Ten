@@ -10,10 +10,11 @@ import (
 const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 
 type Server struct {
-	mux         *http.ServeMux
-	store       *sessionStore
-	leaderboard *leaderboard.Store
-	players     *player.Store
+	mux              *http.ServeMux
+	originProtection *http.CrossOriginProtection
+	store            *sessionStore
+	leaderboard      *leaderboard.Store
+	players          *player.Store
 }
 
 func NewServer(leaderboardStore *leaderboard.Store, playerStore *player.Store) http.Handler {
@@ -25,10 +26,11 @@ func NewServer(leaderboardStore *leaderboard.Store, playerStore *player.Store) h
 	}
 
 	server := &Server{
-		mux:         http.NewServeMux(),
-		store:       newSessionStore(),
-		leaderboard: leaderboardStore,
-		players:     playerStore,
+		mux:              http.NewServeMux(),
+		originProtection: http.NewCrossOriginProtection(),
+		store:            newSessionStore(),
+		leaderboard:      leaderboardStore,
+		players:          playerStore,
 	}
 	server.routes()
 
@@ -38,6 +40,10 @@ func NewServer(leaderboardStore *leaderboard.Store, playerStore *player.Store) h
 // Type Server implements http.Handler, so it can be passed directly to ListenAndServe.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	setSecurityHeaders(w)
+	if err := s.originProtection.Check(r); err != nil {
+		writeError(w, http.StatusForbidden, "cross-origin request denied")
+		return
+	}
 	s.mux.ServeHTTP(w, r)
 }
 

@@ -138,8 +138,8 @@ func TestLoginSetsSessionCookie(t *testing.T) {
 	if cookie.Path != "/" || !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode {
 		t.Fatalf("cookie settings = %#v, want Path=/ HttpOnly SameSite=Lax", cookie)
 	}
-	if cookie.Secure {
-		t.Fatal("local HTTP cookie Secure = true, want false")
+	if !cookie.Secure {
+		t.Fatal("session cookie Secure = false, want true")
 	}
 	if cookie.MaxAge != int(player.SessionLifetime.Seconds()) || cookie.Expires.Before(time.Now()) {
 		t.Fatalf("cookie expiry settings = %#v, want seven-day session", cookie)
@@ -163,6 +163,39 @@ func TestLoginUsesSecureCookieForHTTPS(t *testing.T) {
 	}
 	if !responseCookie(t, response, sessionCookieName).Secure {
 		t.Fatal("HTTPS session cookie Secure = false, want true")
+	}
+}
+
+func TestLoginSucceedsWhenExpiredSessionCleanupFails(t *testing.T) {
+	server, db := newTestServerWithDatabase(t)
+	account := createAPIAccount(t, server, "Ada")
+	if _, err := server.players.CreateSession(context.Background(), account.ID); err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `
+		UPDATE player_sessions SET expires_at = ? WHERE player_id = ?
+	`, time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), account.ID); err != nil {
+		t.Fatalf("expire session: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `
+		CREATE TRIGGER fail_expired_session_cleanup
+		BEFORE DELETE ON player_sessions
+		BEGIN
+			SELECT RAISE(FAIL, 'cleanup failed');
+		END
+	`); err != nil {
+		t.Fatalf("create cleanup failure trigger: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"accountHandle":"Ada","password":"Correct-password"}`))
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if !responseCookie(t, response, sessionCookieName).Secure {
+		t.Fatal("session cookie Secure = false, want true")
 	}
 }
 
@@ -289,7 +322,7 @@ func TestLogoutDeletesCurrentSessionAndClearsCookie(t *testing.T) {
 	}
 
 	cookie := responseCookie(t, response, sessionCookieName)
-	if cookie.MaxAge != -1 || !cookie.Expires.Before(time.Now()) || !cookie.HttpOnly || cookie.Path != "/" || cookie.SameSite != http.SameSiteLaxMode {
+	if cookie.MaxAge != -1 || !cookie.Expires.Before(time.Now()) || !cookie.HttpOnly || !cookie.Secure || cookie.Path != "/" || cookie.SameSite != http.SameSiteLaxMode {
 		t.Fatalf("cleared cookie settings = %#v", cookie)
 	}
 }

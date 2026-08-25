@@ -443,6 +443,150 @@ func TestSecurityHeadersOnResponses(t *testing.T) {
 	}
 }
 
+func TestCrossOriginProtectionAllowsSameOriginUnsafeRoutes(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "create game", method: http.MethodPost, path: "/games", body: `{}`},
+		{name: "delete game", method: http.MethodDelete, path: "/games/missing"},
+		{name: "submit move", method: http.MethodPost, path: "/games/missing/moves", body: `{}`},
+		{name: "reshuffle", method: http.MethodPost, path: "/games/missing/reshuffle"},
+		{name: "remove number", method: http.MethodPost, path: "/games/missing/remove-number", body: `{}`},
+		{name: "hint", method: http.MethodPost, path: "/games/missing/hint"},
+		{name: "submit score", method: http.MethodPost, path: "/scores", body: `{}`},
+		{name: "create player", method: http.MethodPost, path: "/players", body: `{}`},
+		{name: "login", method: http.MethodPost, path: "/auth/login", body: `{}`},
+		{name: "logout", method: http.MethodPost, path: "/auth/logout"},
+	}
+
+	server := newTestServer(t)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
+			request.Header.Set("Sec-Fetch-Site", "same-origin")
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code == http.StatusForbidden {
+				t.Fatalf("same-origin request was rejected with %d", response.Code)
+			}
+		})
+	}
+}
+
+func TestCrossOriginProtection(t *testing.T) {
+	tests := []struct {
+		name       string
+		method     string
+		fetchSite  string
+		origin     string
+		wantStatus int
+	}{
+		{
+			name:       "browser initiated unsafe request",
+			method:     http.MethodPost,
+			fetchSite:  "none",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "same-site unsafe request",
+			method:     http.MethodPost,
+			fetchSite:  "same-site",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "cross-site unsafe request",
+			method:     http.MethodPost,
+			fetchSite:  "cross-site",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "cross-site safe request",
+			method:     http.MethodGet,
+			fetchSite:  "cross-site",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "non-browser unsafe request",
+			method:     http.MethodPost,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "matching origin fallback",
+			method:     http.MethodPost,
+			origin:     "http://example.com",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "foreign origin fallback",
+			method:     http.MethodPost,
+			origin:     "https://attacker.example",
+			wantStatus: http.StatusForbidden,
+		},
+	}
+
+	server := newTestServer(t)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := "/games"
+			if test.method == http.MethodGet {
+				path = "/health"
+			}
+			request := httptest.NewRequest(test.method, "http://example.com"+path, strings.NewReader(`{}`))
+			if test.fetchSite != "" {
+				request.Header.Set("Sec-Fetch-Site", test.fetchSite)
+			}
+			if test.origin != "" {
+				request.Header.Set("Origin", test.origin)
+			}
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d", response.Code, test.wantStatus)
+			}
+			if test.wantStatus == http.StatusForbidden {
+				if body := response.Body.String(); body != "cross-origin request denied\n" {
+					t.Fatalf("response body = %q, want %q", body, "cross-origin request denied\n")
+				}
+				assertSecurityHeaders(t, response.Header())
+			}
+		})
+	}
+}
+
+func TestCrossOriginProtectionRejectsCrossSiteBodylessRoutes(t *testing.T) {
+	paths := []string{
+		"/auth/logout",
+		"/games/missing/reshuffle",
+		"/games/missing/hint",
+	}
+
+	server := newTestServer(t)
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, path, nil)
+			request.Header.Set("Sec-Fetch-Site", "cross-site")
+			response := httptest.NewRecorder()
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
+			}
+			if body := response.Body.String(); body != "cross-origin request denied\n" {
+				t.Fatalf("response body = %q, want %q", body, "cross-origin request denied\n")
+			}
+			assertSecurityHeaders(t, response.Header())
+		})
+	}
+}
+
 func TestCreateGame(t *testing.T) {
 	server := newTestServer(t)
 	request := httptest.NewRequest(http.MethodPost, "/games", strings.NewReader(`{"size":9}`))
@@ -1393,6 +1537,9 @@ func TestGameSnapshotsSSEOpensStream(t *testing.T) {
 	if cacheControl := response.Header.Get("Cache-Control"); cacheControl != "no-cache" {
 		t.Fatalf("Cache-Control = %q, want no-cache", cacheControl)
 	}
+	if buffering := response.Header.Get("X-Accel-Buffering"); buffering != "no" {
+		t.Fatalf("X-Accel-Buffering = %q, want no", buffering)
+	}
 	assertSecurityHeaders(t, response.Header)
 
 	assertNoSSELineWithin(t, response.Body, 20*time.Millisecond)
@@ -1419,6 +1566,9 @@ func TestGameSnapshotsSSEReceivesRuntimeSnapshot(t *testing.T) {
 		t.Fatalf("GET snapshots returned error: %v", err)
 	}
 	defer response.Body.Close()
+	if buffering := response.Header.Get("X-Accel-Buffering"); buffering != "no" {
+		t.Fatalf("X-Accel-Buffering = %q, want no", buffering)
+	}
 
 	move, ok := firstValidSelection(created.response.InitialSnapshot.Board)
 	if !ok {

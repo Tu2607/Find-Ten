@@ -17,8 +17,14 @@ import (
 	"find-ten-game/internal/sqlitedb"
 )
 
-const shutdownTimeout = 5 * time.Second
-const databaseInitTimeout = 5 * time.Second
+const (
+	shutdownTimeout        = 5 * time.Second
+	databaseInitTimeout    = 5 * time.Second
+	readHeaderTimeout      = 10 * time.Second
+	readTimeout            = 15 * time.Second
+	idleTimeout            = 120 * time.Second
+	maximumHeaderSizeBytes = 16 << 10
+)
 
 func main() {
 	addr := flag.String("addr", ":8080", "server listen address")
@@ -60,10 +66,7 @@ func main() {
 }
 
 func listenAndServe(addr string, handler http.Handler) error {
-	server := &http.Server{
-		Addr:    addr,
-		Handler: handler,
-	}
+	server := newHTTPServer(addr, handler)
 
 	serverErrors := make(chan error, 1)
 	go func() {
@@ -92,5 +95,17 @@ func listenAndServe(addr string, handler http.Handler) error {
 		}
 
 		return <-serverErrors
+	}
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    maximumHeaderSizeBytes,
+		// WriteTimeout remains zero because snapshot responses are long-lived SSE streams.
 	}
 }

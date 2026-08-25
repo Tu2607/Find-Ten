@@ -223,11 +223,32 @@ embedding, plugins, and base URL changes. The frontend uses individual CSSOM sty
 assignments where dynamic positioning is required rather than loosening the policy with
 `'unsafe-inline'`.
 
+Unsafe cross-origin requests are rejected before route dispatch by Go's
+`http.CrossOriginProtection`. The protection accepts safe methods and same-origin browser
+requests, rejects `same-site` and `cross-site` unsafe requests reported by `Sec-Fetch-Site`, and
+falls back to validating `Origin` when `Sec-Fetch-Site` is absent. No trusted origins are added
+because the frontend and API share one origin. Security response headers are set before this check
+so rejected requests receive the same headers as other application responses.
+
+The production HTTP server bounds header reads to 10 seconds, whole-request reads to 15 seconds,
+idle keep-alive connections to 120 seconds, and request headers to 16 KiB. `WriteTimeout` remains
+zero deliberately because the SSE snapshot response stays open for the life of a game; a global
+write deadline would sever active streams.
+
+Docker Compose publishes the application port only on `127.0.0.1:8080`. nginx on the same host is
+therefore the only intended inbound path to the container, rather than relying solely on the Oracle
+VCN firewall to hide a port bound on every host interface.
+
 Authentication rate limiting is intentionally deferred to a later edge-deployment step. That step
 must establish the nginx topology and trusted client-address source before selecting a rate-limit
 key. HSTS also belongs with the future HTTPS edge because the current application supports local
 plain-HTTP development. The Go application does not reconstruct client IPs or parse forwarding
 headers.
+
+The in-memory game registry retains its global 150-session cap without a per-client cap. Behind
+nginx the application sees the proxy address and intentionally does not trust forwarded client
+addresses, so client-specific game throttling belongs at the edge. Active game sessions expire
+within at most 180 seconds, bounding the duration of a full-registry denial of service.
 
 ## API Endpoints
 
@@ -349,6 +370,10 @@ Subscriber channels are small buffered channels. If a subscriber is slow, the br
 
 The broker closes subscriber channels when the source snapshot channel closes. Unknown game IDs return `404 Not Found`; known games whose broker has closed return `410 Gone`.
 
+Snapshot responses include `X-Accel-Buffering: no` so nginx forwards events as they are flushed
+rather than buffering them until the response ends. This keeps stream correctness independent of a
+separate proxy-buffering setting.
+
 ### Move Submission
 
 `POST /games/{id}/moves` submits one rectangle selection for an existing game.
@@ -443,11 +468,23 @@ Display names are not unique and cannot be used for login. The server generates 
 
 Passwords are hashed with `golang.org/x/crypto/bcrypt`. The database stores only the bcrypt hash string, which includes the algorithm marker, work factor, salt, and hash output. The application must not add a separate password-salt column for bcrypt. New-account password validation rejects inputs shorter than the 12-character account minimum, inputs over bcrypt's 72-byte limit, inputs without an ASCII non-alphanumeric, non-whitespace character, and inputs without an ASCII uppercase letter. Login accepts existing bcrypt-safe passwords so later policy changes do not lock out existing accounts.
 
-Login creates a 7-day browser session. The browser receives only an opaque random session token in the `find_ten_session` cookie. SQLite stores only a SHA-256 hash of that token because the token is random high-entropy data. Cookies are `HttpOnly`, `SameSite=Lax`, `Path=/`, and use `Secure` only when served over HTTPS so local HTTP development keeps working.
+Login creates a 7-day browser session. The browser receives only an opaque random session token in the `find_ten_session` cookie. SQLite stores only a SHA-256 hash of that token because the token is random high-entropy data. Cookies are always `Secure` in addition to `HttpOnly`, `SameSite=Lax`, and `Path=/`. This is an application invariant rather than runtime configuration: nginx terminates production TLS before proxying to Go, so `r.TLS` cannot reliably describe the browser-facing transport. Logout clears the cookie with the same security attributes.
 
-Expired sessions do not authenticate requests. Session lookup may delete expired rows opportunistically. Logout deletes the current session row when one exists and clears the browser cookie, but it still succeeds when the request is already unauthenticated.
+Expired sessions do not authenticate requests. Creating a new session opportunistically deletes
+expired rows using the indexed expiry column before inserting the new row. Cleanup failures are
+logged but do not fail login, because retaining expired rows does not make them authenticate.
+Logout deletes the current session row when one exists and clears the browser cookie, but it still
+succeeds when the request is already unauthenticated.
 
 Authenticated score submission changes only the identity source. If a valid session cookie is present, the API derives `player_id` and `player_name` from the authenticated player and ignores any browser-sent `playerName`. If no valid session exists, score submission remains the existing guest flow and requires a request `playerName`.
+
+Leaderboard display names remain unverified presentation data: guests may submit a name matching a
+registered account, and display names are intentionally non-unique. Showing verified account
+linkage would require a future response-shape and frontend feature. Account-handle discoverability
+is also accepted: the first account for a display name may receive the unsuffixed public name as its
+handle, while later registrations receive a suffix. Login continues to use a generic credential
+error and a dummy bcrypt comparison for unknown handles, with large-scale throttling owned by the
+edge deployment.
 
 ## Frontend
 

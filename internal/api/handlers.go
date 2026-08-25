@@ -87,7 +87,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setSessionCookie(w, r, token)
+	setSessionCookie(w, token)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(authResponse{
@@ -104,7 +104,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	clearSessionCookie(w, r)
+	clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -314,6 +314,7 @@ func (s *Server) handleGameSnapshots(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
