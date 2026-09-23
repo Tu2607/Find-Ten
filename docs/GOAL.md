@@ -42,17 +42,23 @@ Implemented account foundation (Step 35):
 - 7-day browser sessions
 - account-linked score identity for logged-in submissions
 
+Planned personal score history (Step 38):
+- logged-in players can view a small fixed list of their top scores for a selected board size and duration
+- broader account statistics, aggregate analysis, global rank, and paginated history remain future work
+
 Implemented HTTP hardening (Step 36):
 - `8 KiB` limits on JSON request bodies
 - Content Security Policy and security headers on application-generated responses
+
+Implemented edge deployment:
+- nginx HTTPS termination with HSTS
+- per-address rate limiting on login, registration, and game creation
 
 Out of scope for the current game:
 - multiplayer
 - collapse/refill behavior
 - persistent settings
-- personal score history
 - unlockable progression
-- edge deployment hardening, including HTTPS/HSTS and authentication rate limiting
 
 Permanently excluded:
 - arbitrary quadrilateral selection
@@ -119,5 +125,5 @@ Future work may add:
 - replay validation
 - AI/bot move selection
 - difficulty analysis
-- persistent settings or score history
+- persistent settings or broader player statistics and score history
 - unlockable cosmetics or skills

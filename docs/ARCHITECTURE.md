@@ -239,16 +239,25 @@ Docker Compose publishes the application port only on `127.0.0.1:8080`. nginx on
 therefore the only intended inbound path to the container, rather than relying solely on the Oracle
 VCN firewall to hide a port bound on every host interface.
 
-Authentication rate limiting is intentionally deferred to a later edge-deployment step. That step
-must establish the nginx topology and trusted client-address source before selecting a rate-limit
-key. HSTS also belongs with the future HTTPS edge because the current application supports local
-plain-HTTP development. The Go application does not reconstruct client IPs or parse forwarding
-headers.
+Rate limiting and HTTP Strict Transport Security are owned by the nginx edge rather than by the
+application. nginx applies per-address `limit_req` zones to `POST /auth/login`, `POST /players`, and
+`POST /games`, a `limit_conn` cap on the `/games/` prefix that bounds concurrent snapshot streams
+per address, and sends `Strict-Transport-Security` from the HTTPS server block. The Go application
+does not reconstruct client IPs or parse forwarding headers, so any control keyed on client address
+must live at the edge. HSTS belongs there for the same reason: the application supports local
+plain-HTTP development and cannot know whether the browser-facing transport is TLS.
+
+The edge configuration lives on the deployment host at `/etc/nginx/conf.d/find-ten.conf` and is not
+version-controlled in this repository. Exact zone rates and burst values are therefore deliberately
+not restated here, because they would drift from the deployed values without any signal.
 
 The in-memory game registry retains its global 150-session cap without a per-client cap. Behind
 nginx the application sees the proxy address and intentionally does not trust forwarded client
-addresses, so client-specific game throttling belongs at the edge. Active game sessions expire
-within at most 180 seconds, bounding the duration of a full-registry denial of service.
+addresses, so client-specific game throttling belongs at the edge, where a `limit_req` zone on
+`POST /games` holds any single address's creation rate below the rate at which finished sessions
+release their slots. That bounds the risk rather than eliminating it, since a sufficiently
+distributed client can still exhaust the registry. Active game sessions expire within at most 180
+seconds, bounding the duration of a full-registry denial of service.
 
 ## API Endpoints
 
