@@ -4,6 +4,7 @@
 - Always read this `AGENTS.md` first for project context.
 - Read `docs/GOAL.md` for project goal, MVP scope, gameplay rules, and future direction.
 - Read `docs/ARCHITECTURE.md` for architectural decisions, system boundaries, and design rationale.
+- Read `docs/KNOWN-ISSUES.md` for accepted issues that are documented but not scheduled for a fix.
 - Use the numbered files in `docs/plans/` as the current step-by-step implementation roadmap.
 - Read only the relevant `docs/plans/Step-XX.md` file for the current implementation step unless broader plan context is needed.
 - Implement the plan step by step. Do not skip ahead unless the user explicitly asks.
