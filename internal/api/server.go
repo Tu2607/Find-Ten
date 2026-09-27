@@ -74,6 +74,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /scores", handleMethodNotAllowed)
 	s.mux.HandleFunc("PATCH /scores", handleMethodNotAllowed)
 	s.mux.HandleFunc("POST /players", s.handleCreatePlayer)
+	s.mux.HandleFunc("GET /players/me/stats", s.handlePlayerStats)
 	s.mux.HandleFunc("POST /auth/login", s.handleLogin)
 	s.mux.HandleFunc("POST /auth/logout", s.handleLogout)
 	s.mux.HandleFunc("GET /auth/me", s.handleCurrentPlayer)

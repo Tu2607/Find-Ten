@@ -36,6 +36,12 @@ const state = {
   leaderboardLoading: false,
   leaderboardError: false,
   leaderboardRequestId: 0,
+  statsBoardSize: 9,
+  statsDuration: 120,
+  statsScores: [],
+  statsLoading: false,
+  statsError: false,
+  statsRequestId: 0,
   player: null,
   accountView: "guest",
   registrationHandle: "",
@@ -48,12 +54,19 @@ const state = {
 const welcomeScreen = document.getElementById("welcomeScreen");
 const settingsScreen = document.getElementById("settingsScreen");
 const leaderboardScreen = document.getElementById("leaderboardScreen");
+const statsScreen = document.getElementById("statsScreen");
 const gameScreen = document.getElementById("gameScreen");
 
 // Leaderboard elements
 const leaderboardBodyEl = document.getElementById("leaderboardBody");
 const leaderboardEmptyEl = document.getElementById("leaderboardEmpty");
 const leaderboardFilterSummaryEl = document.getElementById("leaderboardFilterSummary");
+
+// My Stats elements
+const statsButtonEl = document.getElementById("statsButton");
+const statsBodyEl = document.getElementById("statsBody");
+const statsEmptyEl = document.getElementById("statsEmpty");
+const statsFilterSummaryEl = document.getElementById("statsFilterSummary");
 
 // Game elements
 const boardEl = document.getElementById("board");
@@ -126,6 +139,15 @@ document.getElementById("leaderboardBackButton").addEventListener("click", () =>
   showScreen("welcome");
 });
 
+statsButtonEl.addEventListener("click", () => {
+  showScreen("stats");
+  loadStatsScores();
+});
+
+document.getElementById("statsBackButton").addEventListener("click", () => {
+  showScreen("welcome");
+});
+
 showLoginButtonEl.addEventListener("click", () => showAccountView("login"));
 showRegisterButtonEl.addEventListener("click", () => showAccountView("register"));
 document.getElementById("loginCancelButton").addEventListener("click", () => showAccountView("guest"));
@@ -159,6 +181,19 @@ leaderboardScreen.querySelectorAll(".chalk-pill-group").forEach((group) => {
     });
     pill.classList.add("chalk-pill--active");
     updateLeaderboardFilter(group.dataset.filter, pill.dataset.value);
+  });
+});
+
+statsScreen.querySelectorAll(".chalk-pill-group").forEach((group) => {
+  group.addEventListener("click", (event) => {
+    const pill = event.target.closest(".chalk-pill");
+    if (!pill) return;
+
+    group.querySelectorAll(".chalk-pill").forEach((item) => {
+      item.classList.remove("chalk-pill--active");
+    });
+    pill.classList.add("chalk-pill--active");
+    updateStatsFilter(group.dataset.filter, pill.dataset.value);
   });
 });
 
@@ -259,6 +294,7 @@ function showScreen(name) {
   welcomeScreen.hidden = name !== "welcome";
   settingsScreen.hidden = name !== "settings";
   leaderboardScreen.hidden = name !== "leaderboard";
+  statsScreen.hidden = name !== "stats";
   gameScreen.hidden = name !== "game";
 }
 
@@ -284,6 +320,7 @@ function renderAccountState() {
   const accountOverlayVisible = !authenticated && state.accountView !== "guest";
   guestAccountActionsEl.hidden = authenticated || state.accountView !== "guest";
   signedInAccountActionsEl.hidden = !authenticated;
+  statsButtonEl.hidden = !authenticated;
   accountOverlayEl.hidden = !accountOverlayVisible;
   loginFormEl.hidden = authenticated || state.accountView !== "login";
   registrationFormEl.hidden = authenticated || state.accountView !== "register";
@@ -915,6 +952,144 @@ function newLeaderboardCell(text) {
   const cell = document.createElement("td");
   cell.textContent = text;
   return cell;
+}
+
+function updateStatsFilter(filter, value) {
+  const numericValue = Number(value);
+  if (!Number.isInteger(numericValue)) {
+    return;
+  }
+
+  let changed = false;
+  if (filter === "board" && state.statsBoardSize !== numericValue) {
+    state.statsBoardSize = numericValue;
+    changed = true;
+  } else if (filter === "timer" && state.statsDuration !== numericValue) {
+    state.statsDuration = numericValue;
+    changed = true;
+  }
+
+  if (changed) {
+    updateStatsFilterSummary();
+    if (!statsScreen.hidden) {
+      loadStatsScores();
+    }
+  }
+}
+
+async function loadStatsScores() {
+  const requestId = ++state.statsRequestId;
+  state.statsLoading = true;
+  state.statsError = false;
+  renderStatsStatus("Loading scores...");
+
+  const gridSize = encodeURIComponent(String(state.statsBoardSize));
+  const duration = encodeURIComponent(String(state.statsDuration));
+  let response;
+  try {
+    response = await fetchWithTimeout(`/players/me/stats?gridSize=${gridSize}&duration=${duration}`, {
+      credentials: "same-origin"
+    });
+  } catch {
+    if (requestId !== state.statsRequestId) return;
+    state.statsLoading = false;
+    state.statsError = true;
+    renderStatsStatus("Could not load scores.");
+    return;
+  }
+
+  if (requestId !== state.statsRequestId) return;
+
+  if (response.status === httpStatusUnauthorized) {
+    state.statsLoading = false;
+    clearAuthenticatedPlayer();
+    // Only leave the stats screen; a player who has moved on (e.g. into a game) stays put.
+    if (!statsScreen.hidden) {
+      showScreen("welcome");
+      showAccountView("login");
+    }
+    return;
+  }
+  if (!response.ok) {
+    state.statsLoading = false;
+    state.statsError = true;
+    renderStatsStatus("Could not load scores.");
+    return;
+  }
+  if (!(response.headers.get("Content-Type") || "").toLowerCase().includes("application/json")) {
+    state.statsLoading = false;
+    state.statsError = true;
+    renderStatsStatus("Could not load scores.");
+    return;
+  }
+
+  let scores;
+  try {
+    scores = await response.json();
+  } catch {
+    if (requestId !== state.statsRequestId) return;
+    state.statsLoading = false;
+    state.statsError = true;
+    renderStatsStatus("Could not load scores.");
+    return;
+  }
+
+  if (requestId !== state.statsRequestId) return;
+
+  if (!Array.isArray(scores)) {
+    state.statsLoading = false;
+    state.statsError = true;
+    renderStatsStatus("Could not load scores.");
+    return;
+  }
+
+  state.statsScores = scores;
+  state.statsLoading = false;
+  state.statsError = false;
+  renderStatsScores();
+}
+
+function renderStatsScores() {
+  updateStatsFilterSummary();
+  statsBodyEl.replaceChildren();
+
+  if (state.statsScores.length === 0) {
+    statsEmptyEl.textContent = "No scores yet - play a game!";
+    statsEmptyEl.hidden = false;
+    return;
+  }
+
+  statsEmptyEl.hidden = true;
+  state.statsScores.forEach((score) => {
+    const row = document.createElement("tr");
+    row.appendChild(newLeaderboardCell(String(score.rank ?? "")));
+    row.appendChild(newLeaderboardCell(String(score.score ?? 0)));
+    row.appendChild(newLeaderboardCell(formatRemainingMillis(score.remainingMillis)));
+    row.appendChild(newLeaderboardCell(formatSubmittedAt(score.submittedAt)));
+    statsBodyEl.appendChild(row);
+  });
+}
+
+function renderStatsStatus(message) {
+  updateStatsFilterSummary();
+  statsBodyEl.replaceChildren();
+  statsEmptyEl.textContent = message;
+  statsEmptyEl.hidden = false;
+}
+
+function updateStatsFilterSummary() {
+  statsFilterSummaryEl.textContent = `Showing ${state.statsBoardSize} x ${state.statsBoardSize} - ${state.statsDuration}s`;
+}
+
+function formatSubmittedAt(value) {
+  if (typeof value !== "string") {
+    return "—";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+  return date.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 }
 
 function formatRemainingMillis(value) {

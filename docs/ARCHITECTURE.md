@@ -283,6 +283,10 @@ Account endpoints (introduced in Step 35):
 - `POST /auth/logout`
 - `GET /auth/me`
 
+Personal stats endpoint (introduced in Step 38):
+
+- `GET /players/me/stats`
+
 ### Create Game
 
 `POST /games` creates a new single-player game session.
@@ -347,11 +351,21 @@ The leaderboard repository can:
 - insert one submitted score
 - reject duplicate `game_id` submissions
 - query top scores by board size and duration
+- query one player's top scores by board size and duration
 - enforce repository-level storage sanity checks for non-negative scores, remaining time bounds, supported board size and duration, and player-name characters
 
 The leaderboard repository does not validate live game status. A later API step must derive score, board size, duration, and remaining time from backend-owned game session state before calling the repository. Player names are intentionally limited to ASCII letters, digits, spaces, hyphen, underscore, and apostrophe for the first persisted leaderboard implementation.
 
 Step 35 extends leaderboard persistence with nullable account linkage. Score rows continue to store the `player_name` snapshot used by the global leaderboard, and logged-in score submissions also store `player_id` for future account-owned score history, achievements, and unlockables. Guest score rows keep `player_id` as `NULL`.
+
+Step 38 reads that linkage back as a personal top-10 list. `TopScores(ctx, filter)` is the public
+read and `PlayerTopScores(ctx, playerID, filter)` is the personal read. Both share the same
+`TopScoresFilter` type and one unexported query-and-scan helper, but each runs its own static SQL
+statement: the personal statement adds `player_id = ?` so SQLite can use the existing
+`idx_leaderboard_scores_player` index, rather than an optional `OR` predicate that could defeat it.
+The personal read uses the same ranking order as the public leaderboard and a fixed limit of 10;
+it overwrites any caller-supplied `filter.Limit`. Guest rows (`player_id IS NULL`) never appear in
+personal results. No schema or index change was needed.
 
 ### Abandon Game
 
@@ -486,6 +500,16 @@ Logout deletes the current session row when one exists and clears the browser co
 succeeds when the request is already unauthenticated.
 
 Authenticated score submission changes only the identity source. If a valid session cookie is present, the API derives `player_id` and `player_name` from the authenticated player and ignores any browser-sent `playerName`. If no valid session exists, score submission remains the existing guest flow and requires a request `playerName`.
+
+Personal stats (`GET /players/me/stats`, Step 38) take the player identity only from the session
+cookie. The request carries `gridSize` and `duration` but no player identifier, so one player cannot
+request another player's scores. The handler authenticates before validating the filters, so a
+request without a valid session gets `401` even when the filters are invalid; an authenticated
+request validates the filters with the same shared parser and messages as `GET /scores`. Other
+methods receive the mux's automatic `405`. In the WebUI, the `My Stats` menu entry is visible only
+while a player is logged in. A `401` from the latest stats request always clears the logged-in
+player; it returns to the welcome screen with the login popup open only if the stats screen is
+still visible, so a player who has already moved into a game is never pulled out of it.
 
 Leaderboard display names remain unverified presentation data: guests may submit a name matching a
 registered account, and display names are intentionally non-unique. Showing verified account

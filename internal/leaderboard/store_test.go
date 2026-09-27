@@ -477,6 +477,122 @@ func TestTopScoresAppliesDefaultAndMaximumLimit(t *testing.T) {
 	}
 }
 
+func TestPlayerTopScoresOrdersAndFiltersByPlayer(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	adaID := createTestAccount(t, store, "Ada")
+	graceID := createTestAccount(t, store, "Grace")
+	base := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+
+	submissions := []ScoreSubmission{
+		withPlayerID(testSubmission("ada-low", "Ada", 1000, 10, 120, 3000, base), &adaID),
+		withPlayerID(testSubmission("ada-high-late", "Ada", 2000, 10, 120, 4000, base.Add(3*time.Second)), &adaID),
+		withPlayerID(testSubmission("ada-high-early", "Ada", 2000, 10, 120, 4000, base.Add(2*time.Second)), &adaID),
+		withPlayerID(testSubmission("ada-high-more-time", "Ada", 2000, 10, 120, 5000, base.Add(4*time.Second)), &adaID),
+		withPlayerID(testSubmission("ada-other-grid", "Ada", 9999, 11, 120, 9999, base), &adaID),
+		withPlayerID(testSubmission("ada-other-duration", "Ada", 9999, 10, 180, 9999, base), &adaID),
+		withPlayerID(testSubmission("grace-same-filter", "Grace", 9999, 10, 120, 9999, base), &graceID),
+		testSubmission("guest-same-name", "Ada", 9999, 10, 120, 9999, base),
+	}
+	for _, submission := range submissions {
+		if err := store.SubmitScore(ctx, submission); err != nil {
+			t.Fatalf("SubmitScore(%q) failed: %v", submission.GameID, err)
+		}
+	}
+
+	scores, err := store.PlayerTopScores(ctx, adaID, TopScoresFilter{GridSize: 10, DurationSeconds: 120})
+	if err != nil {
+		t.Fatalf("PlayerTopScores failed: %v", err)
+	}
+
+	got := gameIDs(scores)
+	want := []string{"ada-high-more-time", "ada-high-early", "ada-high-late", "ada-low"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("gameIDs = %v, want %v", got, want)
+	}
+}
+
+func TestPlayerTopScoresUsesIDAsFinalTieBreaker(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	playerID := createTestAccount(t, store, "Ada")
+	submittedAt := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+
+	for _, gameID := range []string{"same-rank-1", "same-rank-2", "same-rank-3"} {
+		submission := withPlayerID(testSubmission(gameID, "Ada", 2000, 10, 120, 4000, submittedAt), &playerID)
+		if err := store.SubmitScore(ctx, submission); err != nil {
+			t.Fatalf("SubmitScore(%q) failed: %v", gameID, err)
+		}
+	}
+
+	scores, err := store.PlayerTopScores(ctx, playerID, TopScoresFilter{GridSize: 10, DurationSeconds: 120})
+	if err != nil {
+		t.Fatalf("PlayerTopScores failed: %v", err)
+	}
+
+	got := gameIDs(scores)
+	want := []string{"same-rank-1", "same-rank-2", "same-rank-3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("gameIDs = %v, want %v", got, want)
+	}
+	for i := 1; i < len(scores); i++ {
+		if scores[i-1].ID >= scores[i].ID {
+			t.Fatalf("scores not ordered by ascending ID: previous=%d current=%d", scores[i-1].ID, scores[i].ID)
+		}
+	}
+}
+
+func TestPlayerTopScoresUsesFixedLimit(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	playerID := createTestAccount(t, store, "Ada")
+	submittedAt := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+
+	want := make([]string, 0, playerTopScoresLimit)
+	for i := 0; i < playerTopScoresLimit+2; i++ {
+		gameID := fmt.Sprintf("game-%02d", i)
+		submission := withPlayerID(testSubmission(gameID, "Ada", 1000-i, 10, 120, 0, submittedAt), &playerID)
+		if err := store.SubmitScore(ctx, submission); err != nil {
+			t.Fatalf("SubmitScore(%q) failed: %v", gameID, err)
+		}
+		if i < playerTopScoresLimit {
+			want = append(want, gameID)
+		}
+	}
+
+	for _, limit := range []int{0, 3, playerTopScoresLimit + 1, MaxTopScoresLimit + 1} {
+		t.Run(fmt.Sprintf("limit %d", limit), func(t *testing.T) {
+			scores, err := store.PlayerTopScores(ctx, playerID, TopScoresFilter{GridSize: 10, DurationSeconds: 120, Limit: limit})
+			if err != nil {
+				t.Fatalf("PlayerTopScores failed: %v", err)
+			}
+			if got := gameIDs(scores); !reflect.DeepEqual(got, want) {
+				t.Fatalf("gameIDs = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestPlayerTopScoresReturnsEmptySliceWhenNoScoresMatch(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	playerID := createTestAccount(t, store, "Ada")
+	if err := store.SubmitScore(ctx, testSubmission("guest-game", "Guest", 1000, 10, 120, 0, testNow)); err != nil {
+		t.Fatalf("SubmitScore failed: %v", err)
+	}
+
+	scores, err := store.PlayerTopScores(ctx, playerID, TopScoresFilter{GridSize: 10, DurationSeconds: 120})
+	if err != nil {
+		t.Fatalf("PlayerTopScores failed: %v", err)
+	}
+	if scores == nil {
+		t.Fatal("scores is nil, want empty slice")
+	}
+	if len(scores) != 0 {
+		t.Fatalf("len(scores) = %d, want 0", len(scores))
+	}
+}
+
 func TestSubmitScoreHandlesConcurrentSubmissions(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
@@ -711,6 +827,24 @@ func openTestStoreWithClock(t *testing.T, now func() time.Time) *Store {
 
 func testClock() time.Time {
 	return testNow
+}
+
+func createTestAccount(t *testing.T, store *Store, displayName string) int64 {
+	t.Helper()
+
+	playerStore, err := player.NewStore(context.Background(), store.db)
+	if err != nil {
+		t.Fatalf("player.NewStore failed: %v", err)
+	}
+	account, err := playerStore.CreateAccount(context.Background(), player.CreateAccountInput{
+		DisplayName: displayName,
+		Password:    "Correct-password",
+	})
+	if err != nil {
+		t.Fatalf("CreateAccount failed: %v", err)
+	}
+
+	return account.ID
 }
 
 func closeStore(t *testing.T, store *Store) {

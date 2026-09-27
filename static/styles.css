@@ -540,6 +540,17 @@ button {
   text-align: center;
 }
 
+/* My Stats columns: # / Score / Left / Date */
+.leaderboard-table--stats th:nth-child(2),
+.leaderboard-table--stats td:nth-child(2) {
+  text-align: right;
+}
+
+.leaderboard-table--stats th:nth-child(3),
+.leaderboard-table--stats td:nth-child(3) {
+  text-align: center;
+}
+
 .leaderboard-empty {
   margin: 40px 0;
   text-align: center;
@@ -547,7 +558,8 @@ button {
   opacity: 0.45;
 }
 
-#leaderboardBackButton {
+#leaderboardBackButton,
+#statsBackButton {
   margin-top: auto;
   align-self: center;
 }

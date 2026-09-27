@@ -17,7 +17,42 @@ import (
 const (
 	defaultTopScoresLimit = 15
 	MaxTopScoresLimit     = 100
+	playerTopScoresLimit  = 10
 )
+
+const publicTopScoresQuery = `
+	SELECT
+		id,
+		game_id,
+		player_name,
+		score,
+		grid_size,
+		duration_seconds,
+		remaining_millis,
+		submitted_at
+	FROM leaderboard_scores
+	WHERE grid_size = ? AND duration_seconds = ?
+	ORDER BY score DESC, remaining_millis DESC, submitted_at ASC, id ASC
+	LIMIT ?
+`
+
+// playerTopScoresQuery is kept separate from publicTopScoresQuery so the
+// player_id equality predicate can use idx_leaderboard_scores_player.
+const playerTopScoresQuery = `
+	SELECT
+		id,
+		game_id,
+		player_name,
+		score,
+		grid_size,
+		duration_seconds,
+		remaining_millis,
+		submitted_at
+	FROM leaderboard_scores
+	WHERE player_id = ? AND grid_size = ? AND duration_seconds = ?
+	ORDER BY score DESC, remaining_millis DESC, submitted_at ASC, id ASC
+	LIMIT ?
+`
 
 var (
 	ErrDuplicateGameID        = errors.New("leaderboard score already submitted for game")
@@ -163,21 +198,20 @@ func (s *Store) TopScores(ctx context.Context, filter TopScoresFilter) ([]ScoreE
 		limit = MaxTopScoresLimit
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT
-			id,
-			game_id,
-			player_name,
-			score,
-			grid_size,
-			duration_seconds,
-			remaining_millis,
-			submitted_at
-		FROM leaderboard_scores
-		WHERE grid_size = ? AND duration_seconds = ?
-		ORDER BY score DESC, remaining_millis DESC, submitted_at ASC, id ASC
-		LIMIT ?
-	`, filter.GridSize, filter.DurationSeconds, limit)
+	return s.queryTopScores(ctx, publicTopScoresQuery, filter.GridSize, filter.DurationSeconds, limit)
+}
+
+// PlayerTopScores returns one player's best scores for a grid size and
+// duration. The limit is fixed; any caller-supplied filter.Limit is ignored.
+func (s *Store) PlayerTopScores(ctx context.Context, playerID int64, filter TopScoresFilter) ([]ScoreEntry, error) {
+	filter.Limit = playerTopScoresLimit
+	return s.queryTopScores(ctx, playerTopScoresQuery, playerID, filter.GridSize, filter.DurationSeconds, filter.Limit)
+}
+
+// queryTopScores runs one of the package's static top-score queries and scans
+// the ranked rows. It is not a general-purpose query builder.
+func (s *Store) queryTopScores(ctx context.Context, query string, args ...any) ([]ScoreEntry, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query top leaderboard scores: %w", err)
 	}

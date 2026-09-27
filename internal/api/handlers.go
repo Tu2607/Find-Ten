@@ -116,6 +116,8 @@ func (s *Server) handleCurrentPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	// The URL is the same for every player, so no cache may keep this per-player response.
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(authResponse{
 		Authenticated: true,
@@ -420,33 +422,8 @@ func (s *Server) handleSubmitScore(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTopScores(w http.ResponseWriter, r *http.Request) {
-	gridSizeParam := r.URL.Query().Get("gridSize")
-	if gridSizeParam == "" {
-		writeError(w, http.StatusBadRequest, "gridSize is required")
-		return
-	}
-	gridSize, err := strconv.Atoi(gridSizeParam)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "gridSize must be an integer")
-		return
-	}
-	if err := game.ValidateBoardSize(gridSize); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	durationParam := r.URL.Query().Get("duration")
-	if durationParam == "" {
-		writeError(w, http.StatusBadRequest, "duration is required")
-		return
-	}
-	duration, err := strconv.Atoi(durationParam)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "duration must be an integer")
-		return
-	}
-	if err := game.ValidateDuration(duration); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	gridSize, duration, ok := parseScoreFilterParams(w, r)
+	if !ok {
 		return
 	}
 
@@ -480,6 +457,90 @@ func (s *Server) handleTopScores(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(scores)
+}
+
+// handlePlayerStats returns the signed-in player's own top scores. Identity
+// comes only from the session cookie, so one player cannot read another's.
+func (s *Server) handlePlayerStats(w http.ResponseWriter, r *http.Request) {
+	account, err := s.authenticatedPlayer(r)
+	if err != nil {
+		writeCurrentPlayerError(w, err)
+		return
+	}
+
+	gridSize, duration, ok := parseScoreFilterParams(w, r)
+	if !ok {
+		return
+	}
+
+	entries, err := s.leaderboard.PlayerTopScores(r.Context(), account.ID, leaderboard.TopScoresFilter{
+		GridSize:        gridSize,
+		DurationSeconds: duration,
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			writeError(w, http.StatusRequestTimeout, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to query scores")
+		return
+	}
+
+	scores := make([]scoreResponse, len(entries))
+	for i, entry := range entries {
+		scores[i] = scoreResponse{
+			Rank:            i + 1,
+			PlayerName:      entry.PlayerName,
+			Score:           entry.Score,
+			GridSize:        entry.GridSize,
+			DurationSeconds: entry.DurationSeconds,
+			RemainingMillis: entry.RemainingMillis,
+			SubmittedAt:     entry.SubmittedAt,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	// The URL is the same for every player, so no cache may keep this per-player response.
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(scores)
+}
+
+// parseScoreFilterParams reads and validates the gridSize and duration query
+// parameters shared by the score read endpoints. It writes a 400 and returns
+// ok=false when either is missing or invalid.
+func parseScoreFilterParams(w http.ResponseWriter, r *http.Request) (gridSize, duration int, ok bool) {
+	gridSizeParam := r.URL.Query().Get("gridSize")
+	if gridSizeParam == "" {
+		writeError(w, http.StatusBadRequest, "gridSize is required")
+		return 0, 0, false
+	}
+	gridSize, err := strconv.Atoi(gridSizeParam)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "gridSize must be an integer")
+		return 0, 0, false
+	}
+	if err := game.ValidateBoardSize(gridSize); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return 0, 0, false
+	}
+
+	durationParam := r.URL.Query().Get("duration")
+	if durationParam == "" {
+		writeError(w, http.StatusBadRequest, "duration is required")
+		return 0, 0, false
+	}
+	duration, err = strconv.Atoi(durationParam)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "duration must be an integer")
+		return 0, 0, false
+	}
+	if err := game.ValidateDuration(duration); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return 0, 0, false
+	}
+
+	return gridSize, duration, true
 }
 
 func writeScoreError(w http.ResponseWriter, err error) {

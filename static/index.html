@@ -49,6 +49,7 @@
             <button type="button" class="chalk-btn" id="playButton">Play</button>
             <button type="button" class="chalk-btn" id="settingsButton">Settings</button>
             <button type="button" class="chalk-btn" id="leaderboardButton">Leaderboard</button>
+            <button type="button" class="chalk-btn" id="statsButton" hidden>My Stats</button>
           </nav>
 
           <section class="account-panel" aria-live="polite">
@@ -229,6 +230,57 @@
         </div>
 
         <button type="button" class="chalk-btn" id="leaderboardBackButton">Back</button>
+      </div>
+      <div class="chalk-tray" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <!-- ====== MY STATS SCREEN ====== -->
+  <section id="statsScreen" class="screen screen--leaderboard" hidden>
+    <div class="chalkboard">
+      <div class="chalkboard__surface">
+        <h2 class="chalk-heading">My Stats</h2>
+        <div class="chalk-underline"></div>
+
+        <div class="leaderboard-filters">
+          <div class="leaderboard-filter-group">
+            <span class="chalk-filter-label">Board</span>
+            <div class="chalk-pill-group" data-filter="board">
+              <button type="button" class="chalk-pill chalk-pill--active" data-value="9">9 x 9</button>
+              <button type="button" class="chalk-pill" data-value="10">10 x 10</button>
+              <button type="button" class="chalk-pill" data-value="11">11 x 11</button>
+            </div>
+          </div>
+
+          <div class="leaderboard-filter-group">
+            <span class="chalk-filter-label">Time</span>
+            <div class="chalk-pill-group" data-filter="timer">
+              <button type="button" class="chalk-pill" data-value="60">60s</button>
+              <button type="button" class="chalk-pill chalk-pill--active" data-value="120">120s</button>
+              <button type="button" class="chalk-pill" data-value="180">180s</button>
+            </div>
+          </div>
+        </div>
+
+        <p class="leaderboard-filter-summary" id="statsFilterSummary">Showing 9 x 9 - 120s</p>
+
+        <div class="leaderboard-table-wrapper">
+          <table class="leaderboard-table leaderboard-table--stats">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Score</th>
+                <th>Left</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody id="statsBody"></tbody>
+          </table>
+
+          <p class="leaderboard-empty" id="statsEmpty" aria-live="polite">No scores yet - play a game!</p>
+        </div>
+
+        <button type="button" class="chalk-btn" id="statsBackButton">Back</button>
       </div>
       <div class="chalk-tray" aria-hidden="true"></div>
     </div>
