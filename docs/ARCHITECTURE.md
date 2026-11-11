@@ -122,7 +122,7 @@ type PlayerActionRequest struct {
 
 Rejected player actions do not publish snapshots. Unknown action types are programming errors and should return an internal action error without mutating the board.
 
-Timer expiry remains a separate one-shot runtime signal. It is not a player action and does not publish a board snapshot by itself.
+Timer expiry remains a separate one-shot runtime signal. It is not a player action. The game loop marks the game over and publishes a final snapshot when it processes expiry.
 
 ## State Sharing And Snapshots
 
@@ -133,8 +133,9 @@ The project exposes hard-copy `GameSnapshot` values for display and network resp
 Snapshots are emitted for:
 - initial game start
 - successful player actions
+- terminal timer expiry, including expiry detected while processing an action
 
-Timer countdown changes do not produce board snapshots. The session stores an authoritative expiry deadline, and the UI can derive countdown display from that session-level metadata when a UI/API layer exposes it. Timer expiry is a terminal runtime signal, not a board-state update, so it does not emit a final board snapshot by itself.
+Timer countdown changes do not produce board snapshots. The session stores an authoritative expiry deadline, and the UI can derive countdown display from that session-level metadata when a UI/API layer exposes it. Timer expiry produces a final snapshot with the terminal game state.
 
 Snapshot ordering uses a local sequence counter owned by the runtime. The initial bootstrap snapshot returned by `NewGameSession` has sequence `1`. Runtime snapshots emitted by `RunGame` start at sequence `2` and increment with each successful player action snapshot. The sequence does not belong on `GameState`; it is runtime stream metadata. A future game manager or match session can own this counter when the runtime grows beyond a single loop function.
 
@@ -180,6 +181,22 @@ The session wrapper exposes a small safe API for callers:
 This keeps CLI and HTTP handlers, as well as future WebSocket handlers, from manually wiring channels and goroutines. The API session store can hold multiple sessions without changing the core game loop.
 
 Multiplayer, session IDs, and API routing are intentionally out of scope for the first `GameSession` step.
+
+### Coordinated Sessions (Step 39)
+
+`NewGameSession(ctx, size, durationSeconds)` retains the single-player lifecycle: generate a game, establish its deadline, and start the game loop and session-owned timer. Its `StartsAt()` is zero, meaning actions have no start gate.
+
+`NewCoordinatedSession(ctx, startingState, startsAt, durationSeconds)` uses the same internal session initializer and runtime. The caller supplies a fresh, unmodified state from `NewGame` and must not mutate it during construction. Each coordinated session deep-copies the board, valid-move slice, and valid-move map into independent fresh state. The cache is copied without rebuilding it; scores and skill usage start at zero. The source state is not retained.
+
+The constructor validates the supported duration and requires a future start no more than `CoordinatedStartDelay` (3 seconds) ahead. Each session calculates `expiresAt = startsAt + duration` and runs its own existing expiry timer. Two sessions given the same inputs therefore share a playing window without requiring manager-driven timer signals. Action submission and the game loop both reject all actions, including hints, before `startsAt` with `ErrGameNotStarted`, and reject actions at or after the deadline. The start gate is a time comparison, not another runtime event.
+
+`StartsAt()` and `ExpiresAt()` expose that window. The lead-in is a setup buffer; constructor validation does not guarantee that later match setup finishes before the start. Room management, coordinated-session API registration, and frontend countdowns remain later work.
+
+After `RunGame` returns, the session captures a `GameResult` containing score, game-over reason, and `Completed`. `Completed` is the terminal state's `GameOver` value: cancellation before normal completion yields false, while cancellation after a terminal state is reached does not invalidate the result. If cancellation and expiry are both ready, either may be processed first.
+
+Callers must wait for `Done()` to close before calling `Result()`. The close follows game-loop and timer shutdown and completion of in-flight submissions, and synchronizes access to the retained result without an additional mutex or result channel. Repeated reads return the same value, including for an early finisher. Results are read from the session rather than the broker, which may not yet have stored its last received snapshot.
+
+Snapshot delivery remains blocking until a consumer receives the snapshot or the session context ends. A broker or other consumer must drain each session's snapshot stream for normal shutdown; `Done()` does not bypass a blocked final snapshot. The future manager will wait for both sessions, then read their results, with bounded waiting and cancellation handled at the match layer.
 
 ## HTTP API Layer
 
@@ -383,7 +400,7 @@ If the ID is unknown, the API returns `404 Not Found`. Removed game IDs return `
 
 The initial snapshot is not replayed through SSE. Clients receive that snapshot from `POST /games`.
 
-Runtime snapshots are emitted only after successful player actions. Timer countdown changes, invalid actions, rejected actions, and manual stops do not publish board snapshots.
+Runtime snapshots are emitted after successful player actions and on terminal expiry. Timer countdown changes, invalid actions, and manual stops do not publish board snapshots. An action that detects expiry in the game loop is rejected and produces the terminal snapshot.
 
 `GameSession.Snapshots()` is a single-consumer channel, so SSE handlers must not read it directly. Each stored game owns one snapshot broker. The broker is the only API-layer consumer of `GameSession.Snapshots()` and fans runtime snapshots out to all current SSE subscribers.
 
@@ -544,6 +561,6 @@ The CLI does not call game mutation functions directly after the game loop start
 
 Now that the static WebUI is functional, new gameplay controls should target the WebUI first. The CLI should continue to compile and preserve existing move and reshuffle behavior, but it does not need to grow every new skill command.
 
-Action result waits are context-aware. If the game context is canceled before a result is sent, the CLI stops waiting instead of blocking forever. Per-action result channels are one-shot response channels: they may receive at most one result and are not closed.
+Action result waits are context-aware. If the game context is canceled before a result is sent, the CLI stops waiting instead of blocking forever. Per-action result channels are one-shot response channels: they are buffered with room for one result, receive exactly one result once `RunGame` accepts the action, and are not closed. `RunGame` sends that result unconditionally, so after the action is handed off `submitAction` waits only for the result or its own request context, not for session shutdown. Waiting on shutdown there would race the reply to an already-applied game-ending move.
 
 Snapshot rendering is also event-driven. The CLI prints the initial snapshot, then prints later snapshots emitted after successful player actions. This keeps display reads out of shared mutable `GameState` and makes the CLI a useful concurrency demo rather than a shortcut around the backend architecture.

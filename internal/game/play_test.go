@@ -29,7 +29,7 @@ func TestRunGameProcessesMoveEvents(t *testing.T) {
 		},
 	}
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	if state.Board[0][0] != 0 || state.Board[0][1] != 0 {
 		t.Fatalf("state.Board top row = %+v, want cleared cells", state.Board[0])
@@ -52,7 +52,7 @@ func TestRunGameEndsWhenTimerExpires(t *testing.T) {
 	snapshots := make(chan GameSnapshot, 1)
 	expired <- struct{}{}
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(-time.Second))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(-time.Second))
 
 	if !state.GameOver {
 		t.Fatal("state.GameOver = false, want true")
@@ -83,7 +83,7 @@ func TestRunGameReturnsWhenContextIsCanceled(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		RunGame(ctx, actions, expired, snapshots, state, time.Now().Add(time.Minute))
+		RunGame(ctx, actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 	}()
 
 	select {
@@ -100,7 +100,7 @@ func TestRunGameClosesSnapshotsWhenItReturns(t *testing.T) {
 	snapshots := make(chan GameSnapshot, 1)
 	close(actions)
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	_, ok := <-snapshots
 	if ok {
@@ -115,7 +115,7 @@ func TestRunGameDoesNotEmitStartupSnapshot(t *testing.T) {
 	snapshots := make(chan GameSnapshot, 1)
 	close(actions)
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	_, ok := <-snapshots
 	if ok {
@@ -144,7 +144,7 @@ func TestRunGameEmitsMoveSnapshot(t *testing.T) {
 	}
 	close(actions)
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	first := <-snapshots
 	if first.Sequence != 2 {
@@ -168,7 +168,7 @@ func TestRunGameEmitsReshuffleSnapshot(t *testing.T) {
 	actions <- PlayerActionRequest{Type: PlayerActionReshuffle}
 	close(actions)
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	snapshot := <-snapshots
 	if snapshot.Sequence != 2 {
@@ -207,7 +207,7 @@ func TestRunGameEmitsRemoveNumberSnapshot(t *testing.T) {
 	}
 	close(actions)
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	snapshot := <-snapshots
 	if snapshot.Sequence != 2 {
@@ -250,7 +250,7 @@ func TestRunGameEmitsHintSnapshotAndResult(t *testing.T) {
 	}
 	close(actions)
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	if err := <-results; err != nil {
 		t.Fatalf("hint result error = %v, want nil", err)
@@ -304,7 +304,7 @@ func TestRunGameSequencesMoveReshuffleRemoveNumberAndHintSnapshots(t *testing.T)
 	actions <- PlayerActionRequest{Type: PlayerActionHint}
 	close(actions)
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	first := <-snapshots
 	second := <-snapshots
@@ -343,7 +343,7 @@ func TestRunGameDoesNotEmitSnapshotWhileOnlyTimePassesBeforeExpiry(t *testing.T)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		RunGame(ctx, actions, expired, snapshots, state, time.Now().Add(time.Minute))
+		RunGame(ctx, actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 	}()
 
 	time.Sleep(10 * time.Millisecond)
@@ -376,7 +376,7 @@ func TestRunGameSnapshotBoardIsDeepCopy(t *testing.T) {
 		},
 	}
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	moveSnapshot := <-snapshots
 	if moveSnapshot.Board[0][0] != 0 {
@@ -410,7 +410,7 @@ func TestRunGameMoveResultReturnsError(t *testing.T) {
 		Result: results,
 	}
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	if err := <-results; err != nil {
 		t.Fatalf("move result error = %v, want nil", err)
@@ -448,7 +448,7 @@ func TestRunGameInvalidMoveDoesNotEmitSnapshot(t *testing.T) {
 	}
 	close(actions)
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	if err := <-results; err == nil {
 		t.Fatal("move result error = nil, want invalid move error")
@@ -477,7 +477,7 @@ func TestRunGameRejectedReshuffleDoesNotEmitSnapshot(t *testing.T) {
 	}
 	close(actions)
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	if err := <-results; err != ErrReshuffleAlreadyUsed {
 		t.Fatalf("reshuffle result error = %v, want %v", err, ErrReshuffleAlreadyUsed)
@@ -508,7 +508,7 @@ func TestRunGameRejectedRemoveNumberDoesNotEmitSnapshotOrConsumeSkill(t *testing
 	}
 	close(actions)
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	if err := <-results; err != ErrRemoveNumberInvalidTarget {
 		t.Fatalf("remove-number result error = %v, want %v", err, ErrRemoveNumberInvalidTarget)
@@ -544,7 +544,7 @@ func TestRunGameRejectedHintDoesNotEmitSnapshotOrConsumeSkill(t *testing.T) {
 	}
 	close(actions)
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	if err := <-results; !errors.Is(err, ErrHintAlreadyUsed) {
 		t.Fatalf("hint result error = %v, want %v", err, ErrHintAlreadyUsed)
@@ -575,7 +575,7 @@ func TestRunGameUnknownActionDoesNotEmitSnapshot(t *testing.T) {
 	actions <- PlayerActionRequest{Result: results}
 	close(actions)
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(time.Minute))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(time.Minute))
 
 	if err := <-results; err != ErrUnknownPlayerAction {
 		t.Fatalf("action result error = %v, want %v", err, ErrUnknownPlayerAction)
@@ -610,7 +610,7 @@ func TestRunGameRejectsMoveProcessedAfterExpiry(t *testing.T) {
 		Result: results,
 	}
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(-time.Second))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(-time.Second))
 
 	if err := <-results; err != ErrGameOver {
 		t.Fatalf("move result error = %v, want %v", err, ErrGameOver)
@@ -642,7 +642,7 @@ func TestRunGameRejectsReshuffleProcessedAfterExpiry(t *testing.T) {
 		Result: results,
 	}
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(-time.Second))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(-time.Second))
 
 	if err := <-results; err != ErrGameOver {
 		t.Fatalf("reshuffle result error = %v, want %v", err, ErrGameOver)
@@ -677,7 +677,7 @@ func TestRunGameRejectsRemoveNumberProcessedAfterExpiry(t *testing.T) {
 		Result:   results,
 	}
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(-time.Second))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(-time.Second))
 
 	if err := <-results; err != ErrGameOver {
 		t.Fatalf("remove-number result error = %v, want %v", err, ErrGameOver)
@@ -713,7 +713,7 @@ func TestRunGameRejectsHintProcessedAfterExpiry(t *testing.T) {
 		Hint:   &hint,
 	}
 
-	RunGame(context.Background(), actions, expired, snapshots, state, time.Now().Add(-time.Second))
+	RunGame(context.Background(), actions, expired, snapshots, state, time.Time{}, time.Now().Add(-time.Second))
 
 	if err := <-results; !errors.Is(err, ErrGameOver) {
 		t.Fatalf("hint result error = %v, want %v", err, ErrGameOver)

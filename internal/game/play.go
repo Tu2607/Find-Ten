@@ -20,12 +20,41 @@ func NewGameSession(ctx context.Context, size int, durationSeconds int) (*GameSe
 	}
 
 	expiresAt := time.Now().Add(time.Duration(durationSeconds) * time.Second)
+	session, initialSnapshot := newSession(ctx, state, time.Time{}, expiresAt)
+	return session, initialSnapshot, nil
+}
+
+// NewCoordinatedSession starts a session on a copy of the fresh, unmodified
+// state returned by NewGame. The state must not be mutated while this
+// constructor runs; it is copied and not retained. The session accepts actions
+// from startsAt until startsAt plus durationSeconds and owns its expiry timer.
+func NewCoordinatedSession(ctx context.Context, startingState *GameState, startsAt time.Time, durationSeconds int) (*GameSession, GameSnapshot, error) {
+	if err := ValidateDuration(durationSeconds); err != nil {
+		return nil, GameSnapshot{}, err
+	}
+
+	now := time.Now()
+	if !startsAt.After(now) {
+		return nil, GameSnapshot{}, errors.New("coordinated start time must be in the future")
+	}
+	if startsAt.After(now.Add(CoordinatedStartDelay)) {
+		return nil, GameSnapshot{}, errors.New("coordinated start time is too far in the future")
+	}
+
+	state := copyStartingGameState(startingState)
+	expiresAt := startsAt.Add(time.Duration(durationSeconds) * time.Second)
+	session, initialSnapshot := newSession(ctx, state, startsAt, expiresAt)
+	return session, initialSnapshot, nil
+}
+
+func newSession(ctx context.Context, state *GameState, startsAt, expiresAt time.Time) (*GameSession, GameSnapshot) {
 	initialSnapshot := newGameSnapshot(state, 1)
 	sessionCtx, cancel := context.WithCancel(ctx)
 	session := &GameSession{
 		actions:   make(chan PlayerActionRequest),
 		expired:   make(chan struct{}),
 		snapshots: make(chan GameSnapshot),
+		startsAt:  startsAt,
 		expiresAt: expiresAt,
 		cancel:    cancel,
 		done:      make(chan struct{}),
@@ -34,7 +63,21 @@ func NewGameSession(ctx context.Context, size int, durationSeconds int) (*GameSe
 
 	go session.run(sessionCtx, state)
 
-	return session, initialSnapshot, nil
+	return session, initialSnapshot
+}
+
+func copyStartingGameState(state *GameState) *GameState {
+	copy := &GameState{
+		Board:      cloneBoard(state.Board),
+		ValidMoves: append([]Selection(nil), state.ValidMoves...),
+	}
+	if state.validMoveSet != nil {
+		copy.validMoveSet = make(map[Selection]struct{}, len(state.validMoveSet))
+		for move := range state.validMoveSet {
+			copy.validMoveSet[move] = struct{}{}
+		}
+	}
+	return copy
 }
 
 func (s *GameSession) run(ctx context.Context, state *GameState) {
@@ -45,7 +88,8 @@ func (s *GameSession) run(ctx context.Context, state *GameState) {
 
 	go func() {
 		defer wg.Done()
-		RunGame(ctx, s.actions, s.expired, s.snapshots, state, s.expiresAt)
+		RunGame(ctx, s.actions, s.expired, s.snapshots, state, s.startsAt, s.expiresAt)
+		s.result = resultFromState(state)
 		s.Stop()
 	}()
 
@@ -65,6 +109,17 @@ func (s *GameSession) Snapshots() <-chan GameSnapshot {
 
 func (s *GameSession) ExpiresAt() time.Time {
 	return s.expiresAt
+}
+
+// StartsAt returns the time the session starts accepting player actions.
+// It is zero for a single-player session.
+func (s *GameSession) StartsAt() time.Time {
+	return s.startsAt
+}
+
+// Result returns the final game result. Call it only after Done() has closed.
+func (s *GameSession) Result() GameResult {
+	return s.result
 }
 
 func (s *GameSession) SubmitMove(ctx context.Context, selection Selection) error {
@@ -101,7 +156,11 @@ func (s *GameSession) SubmitHint(ctx context.Context) (Selection, error) {
 }
 
 func (s *GameSession) submitAction(ctx context.Context, request PlayerActionRequest) error {
-	if deadlineExpired(s.expiresAt, time.Now()) {
+	now := time.Now()
+	if startNotReached(s.startsAt, now) {
+		return ErrGameNotStarted
+	}
+	if deadlineExpired(s.expiresAt, now) {
 		return ErrGameOver
 	}
 	if !s.beginSubmit() {
@@ -122,13 +181,11 @@ func (s *GameSession) submitAction(ctx context.Context, request PlayerActionRequ
 		return ctx.Err()
 	}
 
+	// RunGame replies to every action it accepts, so session shutdown cannot
+	// race the reply to an action that was already applied.
 	select {
 	case err := <-results:
 		return err
-	case <-s.closing:
-		return s.closedSubmitError()
-	case <-s.done:
-		return s.closedSubmitError()
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -161,7 +218,11 @@ func (s *GameSession) beginSubmit() bool {
 }
 
 func (s *GameSession) closedSubmitError() error {
-	if deadlineExpired(s.expiresAt, time.Now()) {
+	now := time.Now()
+	if startNotReached(s.startsAt, now) {
+		return ErrGameNotStarted
+	}
+	if deadlineExpired(s.expiresAt, now) {
 		return ErrGameOver
 	}
 
@@ -169,7 +230,7 @@ func (s *GameSession) closedSubmitError() error {
 }
 
 // Receive player action requests and timer expiry signals, then update game state.
-func RunGame(ctx context.Context, actions <-chan PlayerActionRequest, expired <-chan struct{}, snapshots chan<- GameSnapshot, state *GameState, expiresAt time.Time) {
+func RunGame(ctx context.Context, actions <-chan PlayerActionRequest, expired <-chan struct{}, snapshots chan<- GameSnapshot, state *GameState, startsAt, expiresAt time.Time) {
 	defer close(snapshots)
 
 	var sequence int64 = 2
@@ -191,9 +252,9 @@ func RunGame(ctx context.Context, actions <-chan PlayerActionRequest, expired <-
 			if !ok {
 				return
 			}
-			err := applyPlayerActionBeforeDeadline(state, request, expiresAt, time.Now())
+			err := applyPlayerActionInWindow(state, request, startsAt, expiresAt, time.Now())
 			if request.Result != nil {
-				sendActionResult(ctx, request.Result, err)
+				sendActionResult(request.Result, err)
 			}
 			if err == nil {
 				snapshot := newGameSnapshot(state, sequence)
@@ -212,12 +273,15 @@ func RunGame(ctx context.Context, actions <-chan PlayerActionRequest, expired <-
 	}
 }
 
-func applyPlayerActionBeforeDeadline(state *GameState, request PlayerActionRequest, expiresAt time.Time, now time.Time) error {
+func applyPlayerActionInWindow(state *GameState, request PlayerActionRequest, startsAt, expiresAt, now time.Time) error {
 	if state == nil {
 		return ErrNilGameState
 	}
 	if state.GameOver {
 		return ErrGameOver
+	}
+	if startNotReached(startsAt, now) {
+		return ErrGameNotStarted
 	}
 	if deadlineExpired(expiresAt, now) {
 		expireGame(state)
@@ -258,6 +322,22 @@ func deadlineExpired(expiresAt time.Time, now time.Time) bool {
 	return !expiresAt.IsZero() && !now.Before(expiresAt)
 }
 
+func startNotReached(startsAt time.Time, now time.Time) bool {
+	return !startsAt.IsZero() && now.Before(startsAt)
+}
+
+func resultFromState(state *GameState) GameResult {
+	if state == nil {
+		return GameResult{}
+	}
+
+	return GameResult{
+		Score:          state.Score,
+		GameOverReason: state.GameOverReason,
+		Completed:      state.GameOver,
+	}
+}
+
 func publishPreparedSnapshot(ctx context.Context, snapshots chan<- GameSnapshot, snapshot GameSnapshot) {
 	select {
 	case <-ctx.Done():
@@ -265,11 +345,9 @@ func publishPreparedSnapshot(ctx context.Context, snapshots chan<- GameSnapshot,
 	}
 }
 
-func sendActionResult(ctx context.Context, results chan<- error, result error) {
-	select {
-	case <-ctx.Done():
-	case results <- result:
-	}
+// The send is unconditional; the result channel has room for this one reply.
+func sendActionResult(results chan<- error, result error) {
+	results <- result
 }
 
 func newGameSnapshot(state *GameState, sequence int64) GameSnapshot {

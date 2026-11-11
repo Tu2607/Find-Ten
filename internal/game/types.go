@@ -2,6 +2,7 @@ package game
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -14,7 +15,12 @@ const (
 	MinDurationSeconds     = 60
 	DefaultDurationSeconds = 120
 	MaxDurationSeconds     = 180
+	// CoordinatedStartDelay is the lead-in and maximum allowed advance start time.
+	CoordinatedStartDelay = 3 * time.Second
 )
+
+// ErrGameNotStarted is returned when an action arrives before a coordinated session opens.
+var ErrGameNotStarted = errors.New("game has not started")
 
 var supportedDurations = map[int]struct{}{
 	60:  {},
@@ -47,8 +53,10 @@ type PlayerActionRequest struct {
 	Type      PlayerActionType
 	Selection Selection
 	Position  Position
-	Result    chan error
-	Hint      *Selection
+	// Result must be buffered with room for one reply. RunGame sends exactly
+	// one result for every action it accepts.
+	Result chan error
+	Hint   *Selection
 }
 
 type GameOverReason int
@@ -86,11 +94,22 @@ type GameSnapshot struct {
 	SnapshotTime     time.Time
 }
 
+// GameResult is the authoritative result captured when a session's game loop exits.
+type GameResult struct {
+	Score          int
+	GameOverReason GameOverReason
+	// Completed reports whether RunGame reached a terminal state before returning.
+	// It remains true if cancellation happens after the game has ended.
+	Completed bool
+}
+
 type GameSession struct {
 	actions   chan PlayerActionRequest
 	expired   chan struct{}
 	snapshots chan GameSnapshot
+	startsAt  time.Time
 	expiresAt time.Time
+	result    GameResult
 	cancel    context.CancelFunc
 	done      chan struct{}
 	closing   chan struct{}
